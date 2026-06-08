@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>beMatrix LED Cable Planner</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <section class="hero card">
+      <div>
+        <p class="eyebrow">beMatrix install helper</p>
+        <h1>LED Cable Planner</h1>
+        <p class="lede">
+          Plans panel strings based on your install pattern: start bottom-left, snake up/down by column,
+          cap strings at 12 panels, and avoid breaking strings mid-column unless there is no other option.
+        </p>
+      </div>
+      <form id="planner-form" class="controls">
+        <label>
+          <span>Job name</span>
+          <input id="job-name" name="job-name" type="text" placeholder="NAB Booth A" />
+        </label>
+        <label>
+          <span>Client / brand</span>
+          <input id="client-name" name="client-name" type="text" placeholder="RTIC Outdoors" />
+        </label>
+        <label>
+          <span>Install date</span>
+          <input id="install-date" name="install-date" type="date" />
+        </label>
+        <label>
+          <span>Panels high</span>
+          <input id="height" name="height" type="number" min="1" value="5" required />
+        </label>
+        <label>
+          <span>Panels wide</span>
+          <input id="width" name="width" type="number" min="1" value="4" required />
+        </label>
+        <label class="span-2">
+          <span>Notes</span>
+          <input id="job-notes" name="job-notes" type="text" placeholder="Processor at stage left. Power drop per string." />
+        </label>
+        <div class="action-row span-2">
+          <button type="submit">Build diagram</button>
+          <button id="export-pdf" type="button" class="button-secondary">Export PDF</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="print-header" id="print-header">
+      <div class="print-brand">
+        <img src="./logo.svg" alt="ROARK" class="print-logo" />
+        <div>
+          <p class="eyebrow">beMatrix install helper</p>
+          <h2>LED Cable Plan</h2>
+          <p id="print-subtitle" class="print-subtitle"></p>
+        </div>
+      </div>
+      <div class="print-meta">
+        <div><strong id="print-date"></strong></div>
+        <div id="print-job-name"></div>
+        <div id="print-client-name"></div>
+        <div id="print-job-notes"></div>
+        <div>Install pattern: bottom-left start, snake by column, 12-panel max per string</div>
+      </div>
+    </section>
+
+    <section id="warnings" class="warnings"></section>
+
+    <section id="summary" class="summary"></section>
+
+    <section class="layout-grid">
+      <section class="card board-card print-page">
+        <div class="section-head">
+          <h2>Graphic layout</h2>
+          <p>Each string start gets one processor data line and one dedicated 20A power drop.</p>
+        </div>
+        <div class="legend">
+          <span><i class="legend-dot start"></i> String start / processor home run / power drop</span>
+          <span><i class="legend-dot path"></i> Daisy-chain path</span>
+          <span><i class="legend-dot end"></i> String end</span>
+        </div>
+        <div class="board-shell">
+          <svg id="board-paths" class="board-paths" aria-hidden="true"></svg>
+          <div id="board" class="board"></div>
+        </div>
+      </section>
+
+      <section class="card string-card print-page print-page-break">
+        <div class="section-head">
+          <h2>String plan</h2>
+          <p>Processor ports and power drops follow string order.</p>
+        </div>
+        <div id="strings" class="strings"></div>
+      </section>
+    </section>
+  </main>
+
+  <template id="stat-template">
+    <article class="stat card-lite">
+      <span class="label"></span>
+      <strong class="value"></strong>
+      <small class="note"></small>
+    </article>
+  </template>
+
+  <script src="./app.js"></script>
+</body>
+</html>
