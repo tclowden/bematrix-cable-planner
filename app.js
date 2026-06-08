@@ -109,10 +109,15 @@ function planLayout(width, height) {
     powerCables: strings.length,
     dedicatedOutlets: strings.length,
     jumperCables: Math.max(0, totalPanels - strings.length),
+    physicalWidthIn: width * 19.53,
+    physicalHeightIn: height * 19.53,
+    pixelWidth: width * 192,
+    pixelHeight: height * 192,
   };
 }
 
 function arrowFor(panel) {
+  if (panel.isStart) return 'start';
   if (!panel.next) return 'end';
   if (panel.next.col > panel.col) return '→ next';
   if (panel.next.row < panel.row) return '↑ next';
@@ -138,6 +143,8 @@ function renderSummary(plan) {
   summaryEl.innerHTML = '';
   const stats = [
     ['Total panels', plan.totalPanels, `${plan.width} wide × ${plan.height} high`],
+    ['Physical size', `${plan.physicalWidthIn.toFixed(2)}" × ${plan.physicalHeightIn.toFixed(2)}"`, 'Calculated at 19.53" per panel'],
+    ['Pixel size', `${plan.pixelWidth} × ${plan.pixelHeight}`, 'Calculated at 192 × 192 pixels per panel'],
     ['Strings', plan.totalStrings, 'Each string starts a processor port and a power drop'],
     ['Data home runs', plan.dataCables, 'One processor data cable to each string start'],
     ['Power drops', plan.powerCables, 'One dedicated 20A outlet per string start'],
