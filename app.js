@@ -296,13 +296,25 @@ function getJobMeta() {
 }
 
 function applyPrintSizing(plan) {
-  const maxSide = Math.max(plan.width, plan.height), area = plan.width * plan.height;
-  let panelSize = 104, printPanelSize = 76, gap = 8;
-  if (maxSide >= 8 || area >= 40) { panelSize = 92; printPanelSize = 64; gap = 6; }
-  if (maxSide >= 10 || area >= 60) { panelSize = 84; printPanelSize = 56; gap = 5; }
-  if (maxSide >= 12 || area >= 84) { panelSize = 76; printPanelSize = 48; gap = 4; }
+  const maxSide = Math.max(plan.width, plan.height);
+  const area = plan.width * plan.height;
+
+  let panelSize = 104;
+  let gap = 8;
+  if (maxSide >= 8 || area >= 40) { panelSize = 92; gap = 6; }
+  if (maxSide >= 10 || area >= 60) { panelSize = 84; gap = 5; }
+  if (maxSide >= 12 || area >= 84) { panelSize = 76; gap = 4; }
+
+  const printGap = Math.max(2, gap - 2);
+  const printWidthBudget = 980;
+  const printHeightBudget = 420;
+  const widthLimited = Math.floor((printWidthBudget - (printGap * Math.max(0, plan.width - 1))) / plan.width);
+  const heightLimited = Math.floor((printHeightBudget - (printGap * Math.max(0, plan.height - 1))) / plan.height);
+  const printPanelSize = Math.max(28, Math.min(76, widthLimited, heightLimited));
+
   document.documentElement.style.setProperty('--panel-size', `${panelSize}px`);
   document.documentElement.style.setProperty('--panel-gap', `${gap}px`);
+  document.documentElement.style.setProperty('--print-panel-gap', `${printGap}px`);
   document.documentElement.style.setProperty('--print-panel-size', `${printPanelSize}px`);
 }
 

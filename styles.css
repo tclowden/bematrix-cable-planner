@@ -6,6 +6,7 @@
   --panel-size: 104px;
   --panel-gap: 8px;
   --print-panel-size: 76px;
+  --print-panel-gap: 4px;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Inter, system-ui, sans-serif; background: linear-gradient(180deg, #e2e8f0 0%, #f8fafc 100%); color: #0f172a; }
@@ -103,7 +104,7 @@ button:hover { filter: brightness(1.05); }
   .board-shell { overflow:visible; }
   .board-view { display:block !important; break-inside: avoid; }
   .board-view[data-view='data'], .board-view[data-view='power'], .string-card { break-before: page; page-break-before: always; margin-top:.35in; }
-  .board { gap:max(2px, calc(var(--panel-gap) - 2px)); }
+  .board { gap: var(--print-panel-gap); }
   .panel { min-width:var(--print-panel-size); min-height:var(--print-panel-size); break-inside:avoid; border:1.5px solid #334155; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .board-shell,.board,.board-paths,.path-line,.power-path-line,.start-badge,.power-badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   button { display:none !important; }
