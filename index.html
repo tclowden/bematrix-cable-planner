@@ -14,7 +14,7 @@
         <h1>LED Cable Planner</h1>
         <p class="lede">
           Plans panel strings based on your install pattern: start bottom-left, snake up/down by column,
-          cap strings at 12 panels, and avoid breaking strings mid-column unless there is no other option.
+          cap data at 12 panels, and optionally let power stretch to 15 panels when you are limited on outlets.
         </p>
       </div>
       <form id="planner-form" class="controls">
@@ -29,6 +29,13 @@
         <label>
           <span>Install date</span>
           <input id="install-date" name="install-date" type="date" />
+        </label>
+        <label>
+          <span>Power planning mode</span>
+          <select id="power-mode" name="power-mode">
+            <option value="standard">Standard: power follows data strings (12 max)</option>
+            <option value="limited">Limited power: up to 15 panels per power string</option>
+          </select>
         </label>
         <label>
           <span>Panels high</span>
@@ -63,35 +70,49 @@
         <div id="print-job-name"></div>
         <div id="print-client-name"></div>
         <div id="print-job-notes"></div>
-        <div>Install pattern: bottom-left start, snake by column, 12-panel max per string</div>
+        <div id="print-power-mode"></div>
+        <div>Install pattern: bottom-left start, snake by column, 12-panel data max</div>
       </div>
     </section>
 
     <section id="warnings" class="warnings"></section>
-
     <section id="summary" class="summary"></section>
 
     <section class="layout-grid">
       <section class="card board-card print-page">
         <div class="section-head">
           <h2>Graphic layout</h2>
-          <p>Each string start gets one processor data line and one dedicated 20A power drop.</p>
+          <p>Switch between data, power, and combined views. PDF export prints all three as separate pages.</p>
         </div>
-        <div class="legend">
-          <span><i class="legend-dot start"></i> String start / processor home run / power drop</span>
-          <span><i class="legend-dot path"></i> Daisy-chain path</span>
+        <div class="view-toggle" id="view-toggle">
+          <button type="button" class="toggle-btn active" data-view="combined">Combined</button>
+          <button type="button" class="toggle-btn" data-view="data">Data</button>
+          <button type="button" class="toggle-btn" data-view="power">Power</button>
+        </div>
+        <div class="legend legend-combined active" data-legend="combined">
+          <span><i class="legend-dot start"></i> Data start</span>
+          <span><i class="legend-dot power"></i> Power start badge</span>
+          <span><i class="legend-dot path"></i> Data path</span>
           <span><i class="legend-dot end"></i> String end</span>
         </div>
-        <div class="board-shell">
-          <svg id="board-paths" class="board-paths" aria-hidden="true"></svg>
-          <div id="board" class="board"></div>
+        <div class="legend" data-legend="data">
+          <span><i class="legend-dot start"></i> Data start</span>
+          <span><i class="legend-dot path"></i> Data path</span>
+          <span><i class="legend-dot end"></i> Data end</span>
         </div>
+        <div class="legend" data-legend="power">
+          <span><i class="legend-dot power"></i> Power start</span>
+          <span><i class="legend-dot power-line"></i> Power path</span>
+          <span><i class="legend-dot end"></i> Power end</span>
+        </div>
+
+        <div id="board-views" class="board-views"></div>
       </section>
 
       <section class="card string-card print-page print-page-break">
         <div class="section-head">
           <h2>String plan</h2>
-          <p>Processor ports and power drops follow string order.</p>
+          <p>Data and power are listed separately so constrained-power layouts stay readable.</p>
         </div>
         <div id="strings" class="strings"></div>
       </section>
