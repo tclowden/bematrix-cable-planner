@@ -193,7 +193,7 @@ function createBoardView(plan, view) {
   const wrap = document.createElement('section');
   wrap.className = `board-view${view === activeView ? ' active' : ''} print-page ${view === 'data' ? 'print-page-break' : ''}`;
   wrap.dataset.view = view;
-  wrap.innerHTML = `<h3 class="view-title">${view.charAt(0).toUpperCase() + view.slice(1)} view</h3><div class="board-shell"><svg class="board-paths" aria-hidden="true"></svg><div class="board"></div></div>`;
+  wrap.innerHTML = `<h3 class="view-title">${view.charAt(0).toUpperCase() + view.slice(1)} view</h3><div class="board-shell"><div class="board-scale-wrap"><svg class="board-paths" aria-hidden="true"></svg><div class="board"></div></div></div>`;
   const board = wrap.querySelector('.board');
   board.style.gridTemplateColumns = `repeat(${plan.width}, minmax(104px, 1fr))`;
   for (let row = 0; row < plan.height; row += 1) {
@@ -210,11 +210,20 @@ function createBoardView(plan, view) {
     }
   }
   drawPathsForView(plan, view, wrap.querySelector('.board-paths'), board);
+  applyBoardPrintScale(wrap, board);
   return wrap;
 }
 
 function getCenter(el) {
   return { x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 };
+}
+
+function applyBoardPrintScale(wrap, board) {
+  const widthBudget = 980;
+  const heightBudget = 360;
+  const scale = Math.min(1, widthBudget / Math.max(1, board.scrollWidth), heightBudget / Math.max(1, board.scrollHeight));
+  wrap.style.setProperty('--print-board-scale', `${scale}`);
+  wrap.style.setProperty('--print-board-height', `${Math.ceil(board.scrollHeight * scale)}px`);
 }
 
 function drawPathsForView(plan, view, svg, board) {
