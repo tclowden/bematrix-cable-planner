@@ -38,12 +38,25 @@
           </select>
         </label>
         <label>
+          <span>Processor type</span>
+          <select id="processor-type" name="processor-type">
+            <option value="">Select processor</option>
+            <option value="MX20">MX20</option>
+            <option value="MX30">MX30</option>
+            <option value="MX40">MX40</option>
+          </select>
+        </label>
+        <label>
           <span>Panels high</span>
           <input id="height" name="height" type="number" min="1" value="5" required />
         </label>
         <label>
           <span>Panels wide</span>
           <input id="width" name="width" type="number" min="1" value="4" required />
+        </label>
+        <label>
+          <span>IP address</span>
+          <input id="ip-address" name="ip-address" type="text" inputmode="decimal" placeholder="192.168.1.100" />
         </label>
         <label class="span-2">
           <span>Notes</span>
@@ -52,6 +65,7 @@
         <div class="action-row span-2">
           <button type="submit">Build diagram</button>
           <button id="export-pdf" type="button" class="button-secondary">Export PDF</button>
+          <button id="export-pixel-map" type="button" class="button-secondary">Download pixel map JPG</button>
         </div>
       </form>
     </section>
@@ -69,6 +83,8 @@
         <div><strong id="print-date"></strong></div>
         <div id="print-job-name"></div>
         <div id="print-client-name"></div>
+        <div id="print-processor-type"></div>
+        <div id="print-ip-address"></div>
         <div id="print-job-notes"></div>
         <div id="print-power-mode"></div>
         <div>Install pattern: bottom-left start, snake by column, 12-panel data max</div>
@@ -82,12 +98,23 @@
       <section class="card board-card print-page">
         <div class="section-head">
           <h2>Graphic layout</h2>
-          <p>Switch between data, power, and combined views. PDF export prints all three as separate pages.</p>
+          <p>Drag panels onto occupied squares to swap them, or onto dashed empty squares to reshape the wall. Changes update every view and the pixel map immediately.</p>
         </div>
         <div class="view-toggle" id="view-toggle">
           <button type="button" class="toggle-btn active" data-view="combined">Combined</button>
           <button type="button" class="toggle-btn" data-view="data">Data</button>
           <button type="button" class="toggle-btn" data-view="power">Power</button>
+          <button id="reset-panel-layout" type="button" class="toggle-btn reset-layout-btn">Reset panel layout</button>
+        </div>
+        <div class="mapping-tools">
+          <div id="new-panel-tool" class="mapping-tool new-panel-tool" draggable="true" tabindex="0">
+            <strong>＋ New panel</strong>
+            <span>Drag into an empty square, or click here then click a square</span>
+          </div>
+          <div id="delete-panel-zone" class="mapping-tool delete-panel-zone">
+            <strong>Delete panel</strong>
+            <span>Drag a panel here</span>
+          </div>
         </div>
         <div class="legend legend-combined active" data-legend="combined">
           <span><i class="legend-dot start"></i> Data start</span>
@@ -116,6 +143,19 @@
         </div>
         <div id="strings" class="strings"></div>
       </section>
+    </section>
+
+    <section class="card pixel-map-card">
+      <div class="section-head pixel-map-head">
+        <div>
+          <h2>Pixel map</h2>
+          <p>A true-resolution 192 × 192 px grid for every LED panel, checkerboarded with light and dark shades for each data string. Download the JPG for content setup and documentation.</p>
+        </div>
+        <strong id="pixel-map-size" class="pixel-map-size"></strong>
+      </div>
+      <div class="pixel-map-shell">
+        <canvas id="pixel-map-canvas" aria-label="LED wall pixel map"></canvas>
+      </div>
     </section>
   </main>
 
