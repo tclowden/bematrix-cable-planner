@@ -503,6 +503,14 @@ function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel, proc
     cabinet,
     cabinetId: cabinetIds[index],
   }));
+  const mx40Reference = processorType === 'MX40' && cabinetRecords[0]?.cabinetId
+    ? cabinetRecords[0]
+    : null;
+  const mx40CabinetBase = mx40Reference
+    ? BigInt(mx40Reference.cabinetId)
+      - BigInt(Number(mx40Reference.cabinet.connectID) || 0)
+      - (BigInt(Number(mx40Reference.cabinet.outputID) - 2048) * 65536n)
+    : null;
   const cabinetsByOutput = new Map();
   cabinetRecords.forEach((record) => {
     const records = cabinetsByOutput.get(record.cabinet.outputID) || [];
@@ -526,14 +534,14 @@ function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel, proc
     const outputCabinets = cabinetsByOutput.get(assignment.outputID) || [];
     const outputOffset = outputOffsets.get(assignment.outputID) || 0;
     let templateRecord = outputCabinets[outputOffset];
-    if (!templateRecord && processorType === 'MX40' && cabinetRecords[0]?.cabinetId) {
-      const reference = outputCabinets[0] || cabinetRecords[0];
-      const referenceConnectId = Number(reference.cabinet.connectID) || 0;
-      const referenceOutputOffset = Number(reference.cabinet.outputID) - 2048;
-      const cabinetBase = BigInt(reference.cabinetId) - BigInt(referenceConnectId) - (BigInt(referenceOutputOffset) * 65536n);
+    // MX40 cabinet IDs encode the physical port and connection index. Always
+    // derive them from one controller-wide base; mixing IDs copied from the
+    // template with generated IDs can collide on later ports, causing VMP to
+    // silently discard cabinets or start a string above connection 1.
+    if (mx40CabinetBase !== null && mx40Reference) {
       templateRecord = {
-        cabinet: { ...reference.cabinet },
-        cabinetId: String(cabinetBase + (BigInt(assignment.outputID - 2048) * 65536n) + BigInt(outputOffset)),
+        cabinet: { ...(templateRecord?.cabinet || mx40Reference.cabinet) },
+        cabinetId: String(mx40CabinetBase + (BigInt(assignment.outputID - 2048) * 65536n) + BigInt(assignment.connectID)),
       };
     }
     if (!templateRecord?.cabinetId) {
@@ -553,6 +561,10 @@ function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel, proc
       lockStatus: false,
     };
   });
+  const generatedIds = targetCanvas.cabinets.map((cabinet) => cabinet.cabinetID);
+  if (new Set(generatedIds).size !== generatedIds.length) {
+    throw new Error('The generated VMP project contains duplicate cabinet IDs.');
+  }
   canvases.slice(1).forEach((canvas) => { canvas.cabinets = []; });
   targetCanvas.size = { width: plan.pixelWidth, height: plan.pixelHeight };
   targetCanvas.rectSize = { width: plan.pixelWidth, height: plan.pixelHeight };
