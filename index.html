@@ -16,7 +16,7 @@
         <h1>LED Cable Planner</h1>
         <p class="lede">
           Plans panel strings based on your install pattern: start bottom-left, snake up/down by column,
-          cap data at 12 panels, and optionally let power stretch to 15 panels when you are limited on outlets.
+          cap data at 12 panels on MX20/MX30 or 16 panels on MX40, and optionally let power stretch to 15 panels when you are limited on outlets.
         </p>
       </div>
       <form id="planner-form" class="controls">
@@ -94,7 +94,7 @@
         <div id="print-ip-address"></div>
         <div id="print-job-notes"></div>
         <div id="print-power-mode"></div>
-        <div>Install pattern: bottom-left start, snake by column, 12-panel data max</div>
+        <div>Install pattern: bottom-left start, snake by column, processor-aware data limit</div>
       </div>
     </section>
 
@@ -105,7 +105,7 @@
       <section class="card board-card print-page">
         <div class="section-head">
           <h2>Graphic layout</h2>
-          <p>Click a panel to select it; Cmd-click (Mac) or Ctrl-click adds more. Drag a selection to move it, drop it on a data string to reassign it, or click an empty square to add a panel.</p>
+          <p>Click a panel to select it; Cmd-click (Mac) or Ctrl-click adds more. Drag across empty board space for box selection, drag a selection to move it, or drop it on a data string to reassign it.</p>
         </div>
         <div class="view-toggle" id="view-toggle">
           <button type="button" class="toggle-btn active" data-view="combined">Combined</button>

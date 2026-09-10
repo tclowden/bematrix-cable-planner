@@ -42,6 +42,11 @@ let selectedPositionKey = null;
 let selectedPositionKeys = new Set();
 let boardZoom = 1;
 const panelEditHistory = [];
+let suppressNextEmptyClick = false;
+
+function getDataStringLimit(processorType = document.getElementById('processor-type').value || 'MX40') {
+  return processorType === 'MX40' ? 16 : 12;
+}
 
 function snapshotPlan() {
   return {
@@ -75,6 +80,7 @@ function getInputs() {
     width: Number(document.getElementById('width').value),
     height: Number(document.getElementById('height').value),
     powerMode: document.getElementById('power-mode').value,
+    processorType: document.getElementById('processor-type').value || 'MX40',
   };
 }
 
@@ -156,16 +162,17 @@ function mergePanelAssignments(width, height, dataStrings, powerStrings) {
   return map;
 }
 
-function planLayout(width, height, powerMode) {
+function planLayout(width, height, powerMode, processorType = 'MX40') {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) throw new Error('Height and width must both be whole numbers greater than 0.');
-  const dataResult = buildStrings(width, height, 12, 'data', true);
+  const dataLimit = getDataStringLimit(processorType);
+  const dataResult = buildStrings(width, height, dataLimit, 'data', true);
   const powerResult = buildStrings(width, height, powerMode === 'limited' ? 15 : 12, 'power', powerMode !== 'limited');
   const dataStrings = dataResult.strings.map((string, i) => ({ ...string, port: string.id, color: palette[i % palette.length] }));
   const powerStrings = powerResult.strings.map((string, i) => ({ ...string, outlet: string.id, color: palette[(i + 4) % palette.length] }));
   const warnings = [...dataResult.warnings, ...powerResult.warnings];
   if (powerMode === 'limited' && powerStrings.length < dataStrings.length) warnings.unshift(`Limited power mode is active: data uses ${dataStrings.length} strings, power uses ${powerStrings.length} strings.`);
   return {
-    width, height, layoutWidth: width, layoutHeight: height, nextAddedPanelId: 1, powerMode,
+    width, height, layoutWidth: width, layoutHeight: height, nextAddedPanelId: 1, powerMode, processorType,
     dataStrings, powerStrings,
     panelMap: mergePanelAssignments(width, height, dataStrings, powerStrings),
     warnings,
@@ -270,7 +277,7 @@ function renderSummary(plan) {
     ['Total panels', plan.totalPanels, `${plan.layoutWidth} wide × ${plan.layoutHeight} high layout`],
     ['Physical size', `${plan.physicalWidthIn.toFixed(2)}" × ${plan.physicalHeightIn.toFixed(2)}"`, '19.53" per panel'],
     ['Pixel size', `${plan.pixelWidth} × ${plan.pixelHeight}`, '192 × 192 per panel'],
-    ['Data strings', plan.dataStrings.length, '12 max panels per data string'],
+    ['Data strings', plan.dataStrings.length, `${getDataStringLimit(plan.processorType)} max panels per data string`],
     ['Power strings', plan.powerStrings.length, plan.powerMode === 'limited' ? '15 max panels per power string' : 'Power follows data strings'],
     ['Data home runs', plan.dataCables, 'One processor port per data string'],
     ['Power drops', plan.powerDrops, 'One dedicated 20A outlet per power string'],
@@ -466,11 +473,11 @@ function updateProjectXml(checkXml, controller, processorIp, archivePath, projec
   return new XMLSerializer().serializeToString(documentXml);
 }
 
-function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel) {
+function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel, processorType) {
   const canvases = screenConfig.screens?.flatMap((screen) => screen.canvases || []) || [];
   if (!canvases.length) throw new Error('The selected controller template has no screen canvas.');
   const cabinetPool = canvases.flatMap((canvas) => canvas.cabinets || []);
-  if (plan.totalPanels > cabinetPool.length) {
+  if (processorType !== 'MX40' && plan.totalPanels > cabinetPool.length) {
     throw new Error(`This template contains ${cabinetPool.length} cabinet records, but the plan needs ${plan.totalPanels}. Use a template with at least that many cabinets.`);
   }
 
@@ -501,7 +508,17 @@ function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel) {
     if (!position) throw new Error('A data string references a panel that is not in the current layout.');
     const outputCabinets = cabinetsByOutput.get(assignment.outputID) || [];
     const outputOffset = outputOffsets.get(assignment.outputID) || 0;
-    const templateRecord = outputCabinets[outputOffset];
+    let templateRecord = outputCabinets[outputOffset];
+    if (!templateRecord && processorType === 'MX40' && cabinetRecords[0]?.cabinetId) {
+      const reference = outputCabinets[0] || cabinetRecords[0];
+      const referenceConnectId = Number(reference.cabinet.connectID) || 0;
+      const referenceOutputOffset = Number(reference.cabinet.outputID) - 2048;
+      const cabinetBase = BigInt(reference.cabinetId) - BigInt(referenceConnectId) - (BigInt(referenceOutputOffset) * 65536n);
+      templateRecord = {
+        cabinet: { ...reference.cabinet },
+        cabinetId: String(cabinetBase + (BigInt(assignment.outputID - 2048) * 65536n) + BigInt(outputOffset)),
+      };
+    }
     if (!templateRecord?.cabinetId) {
       throw new Error(`The ${processorLabel} template does not have enough cabinet records for Port ${assignment.outputID - 2047}. Add panels to an available port or provide a ${processorLabel} VMP template that uses this port.`);
     }
@@ -582,11 +599,11 @@ async function createNprj() {
   if (!configEntry) throw new Error(`The ${controller.model} template does not contain ${configPath}.`);
   const rawScreenConfig = await configEntry.async('string');
   const cabinetIds = [...rawScreenConfig.matchAll(/"cabinetID"\s*:\s*(\d+)/g)].map((match) => match[1]);
-  if (cabinetIds.length < currentPlan.totalPanels) {
+  if (template.processorType !== 'MX40' && cabinetIds.length < currentPlan.totalPanels) {
     throw new Error(`The template contains only ${cabinetIds.length} exact cabinet IDs for ${currentPlan.totalPanels} panels.`);
   }
   const screenConfig = JSON.parse(rawScreenConfig);
-  controllerZip.file(configPath, serializeNovaConfig(updateScreenConfig(screenConfig, currentPlan, cabinetIds, template.label)));
+  controllerZip.file(configPath, serializeNovaConfig(updateScreenConfig(screenConfig, currentPlan, cabinetIds, template.label, template.processorType)));
 
   const meta = getJobMeta();
   const projectName = meta.jobName || meta.clientName || 'LED Wall';
@@ -674,7 +691,9 @@ function importProject(project) {
   if (!['standard', 'limited'].includes(project.powerMode)) throw new Error('The project has an invalid power mode.');
   if (!Array.isArray(project.panels) || project.panels.length > 10000) throw new Error('The project panel list is invalid or too large.');
 
-  const plan = planLayout(width, height, project.powerMode);
+  const meta = project.meta && typeof project.meta === 'object' ? project.meta : {};
+  const processorType = ['MX20', 'MX30', 'MX40'].includes(meta.processorType) ? meta.processorType : 'MX40';
+  const plan = planLayout(width, height, project.powerMode, processorType);
   const positionKeys = new Set();
   const sourceKeys = new Set();
   plan.panelMap = new Map();
@@ -695,13 +714,12 @@ function importProject(project) {
       addedLabel: typeof entry.source.addedLabel === 'string' ? entry.source.addedLabel.slice(0, 80) : undefined,
     });
   });
-  plan.dataStrings = buildImportedStrings(project.panels, 'data', 12);
+  plan.dataStrings = buildImportedStrings(project.panels, 'data', getDataStringLimit(plan.processorType));
   plan.powerStrings = buildImportedStrings(project.panels, 'power', project.powerMode === 'limited' ? 15 : 12);
   plan.nextAddedPanelId = requireInteger(project.nextAddedPanelId ?? 1, 'Next added panel ID', 1);
   plan.warnings = [];
   refreshStringAssignments(plan);
 
-  const meta = project.meta && typeof project.meta === 'object' ? project.meta : {};
   document.getElementById('width').value = width;
   document.getElementById('height').value = height;
   document.getElementById('power-mode').value = project.powerMode;
@@ -785,6 +803,10 @@ function createBoardView(plan, view) {
         tile.title = 'Click to add a panel, or drop selected panels here to move them';
         addPanelDropHandlers(tile);
         tile.addEventListener('click', () => {
+          if (suppressNextEmptyClick) {
+            suppressNextEmptyClick = false;
+            return;
+          }
           addPanelAt(tile.dataset.positionKey);
           placingNewPanel = false;
           newPanelTool.classList.remove('placing');
@@ -821,9 +843,58 @@ function createBoardView(plan, view) {
       board.appendChild(tile);
     }
   }
+  setupMarqueeSelection(wrap.querySelector('.board-scale-wrap'), board);
   drawPathsForView(plan, view, wrap.querySelector('.board-paths'), board);
   applyBoardPrintScale(wrap, board);
   return wrap;
+}
+
+function setupMarqueeSelection(wrap, board) {
+  wrap.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.target.closest('.panel:not(.empty-panel)')) return;
+    const additive = event.metaKey || event.ctrlKey;
+    const initialSelection = additive ? new Set(selectedPositionKeys) : new Set();
+    const origin = { x: event.clientX, y: event.clientY };
+    const marquee = document.createElement('div');
+    marquee.className = 'selection-marquee';
+    wrap.appendChild(marquee);
+    let moved = false;
+
+    const update = (pointerEvent) => {
+      const left = Math.min(origin.x, pointerEvent.clientX);
+      const top = Math.min(origin.y, pointerEvent.clientY);
+      const right = Math.max(origin.x, pointerEvent.clientX);
+      const bottom = Math.max(origin.y, pointerEvent.clientY);
+      moved = moved || Math.abs(pointerEvent.clientX - origin.x) > 4 || Math.abs(pointerEvent.clientY - origin.y) > 4;
+      const wrapRect = wrap.getBoundingClientRect();
+      marquee.style.left = `${(left - wrapRect.left) / boardZoom}px`;
+      marquee.style.top = `${(top - wrapRect.top) / boardZoom}px`;
+      marquee.style.width = `${(right - left) / boardZoom}px`;
+      marquee.style.height = `${(bottom - top) / boardZoom}px`;
+      if (!moved) return;
+      const nextSelection = new Set(initialSelection);
+      board.querySelectorAll('.panel:not(.empty-panel)').forEach((panel) => {
+        const rect = panel.getBoundingClientRect();
+        const intersects = rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
+        if (intersects) nextSelection.add(panel.dataset.positionKey);
+      });
+      selectedPositionKeys = nextSelection;
+      selectedPositionKey = [...selectedPositionKeys][0] || null;
+      board.querySelectorAll('.panel:not(.empty-panel)').forEach((panel) => panel.classList.toggle('selected-panel', selectedPositionKeys.has(panel.dataset.positionKey)));
+      renderPanelEditor();
+    };
+    const finish = () => {
+      window.removeEventListener('pointermove', update);
+      window.removeEventListener('pointerup', finish);
+      marquee.remove();
+      if (moved) {
+        suppressNextEmptyClick = true;
+        setTimeout(() => { suppressNextEmptyClick = false; }, 100);
+      }
+    };
+    window.addEventListener('pointermove', update);
+    window.addEventListener('pointerup', finish);
+  });
 }
 
 function addPanelDragHandlers(tile) {
@@ -934,7 +1005,7 @@ function addPanelAt(targetKey) {
   currentPlan.panelMap.set(targetKey, panel);
   selectedPositionKeys = new Set([targetKey]);
   selectedPositionKey = targetKey;
-  appendPanelToString(currentPlan.dataStrings, sourcePanel, 'data', 12);
+  appendPanelToString(currentPlan.dataStrings, sourcePanel, 'data', getDataStringLimit(currentPlan.processorType));
   appendPanelToString(currentPlan.powerStrings, sourcePanel, 'power', currentPlan.powerMode === 'limited' ? 15 : 12);
   refreshStringAssignments(currentPlan);
   renderMappedPlan();
@@ -987,7 +1058,7 @@ function movePanelToDataString(positionKey, targetStringId, requestedOrder) {
   const sourceString = currentPlan.dataStrings.find((string) => string.panels.some((item) => sameSourcePanel(item, panel)));
   let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
   if (!targetString) {
-    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: 12, panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
     currentPlan.dataStrings.push(targetString);
   }
   const sameString = sourceString === targetString;
@@ -1012,7 +1083,7 @@ function moveSelectedPanelsToDataString(targetStringId) {
   }
   let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
   if (!targetString) {
-    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: 12, panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
     currentPlan.dataStrings.push(targetString);
   }
   const selectedSources = currentPlan.dataStrings.flatMap((string) => string.panels).filter((source) => selectedPanels.some((panel) => sameSourcePanel(source, panel)));
@@ -1251,8 +1322,8 @@ function renderPlan(plan) {
 }
 
 function renderCurrentPlan() {
-  const { width, height, powerMode } = getInputs();
-  renderPlan(planLayout(width, height, powerMode));
+  const { width, height, powerMode, processorType } = getInputs();
+  renderPlan(planLayout(width, height, powerMode, processorType));
 }
 
 form.addEventListener('submit', (event) => {
@@ -1261,6 +1332,10 @@ form.addEventListener('submit', (event) => {
     renderWarnings([error.message]);
     summaryEl.innerHTML = ''; boardViewsEl.innerHTML = ''; stringsEl.innerHTML = '';
   }
+});
+
+document.getElementById('processor-type').addEventListener('change', () => {
+  try { renderCurrentPlan(); } catch (error) { renderWarnings([error.message]); }
 });
 
 viewToggleEl.addEventListener('click', (event) => {

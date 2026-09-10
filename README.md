@@ -7,7 +7,7 @@ Local single-page planner for beMatrix LED panel stringing.
 - asks for panel height and width
 - plans strings starting bottom-left
 - snakes up/down by column
-- caps each string at 12 panels
+- caps each data string at 12 panels for MX20/MX30 or 16 panels for MX40
 - prefers keeping strings on full columns instead of breaking mid-column
 - counts:
   - processor/data home runs
@@ -38,4 +38,4 @@ Then open:
 
 ## Current assumption
 
-If a column is taller than 12 panels, the planner warns and splits strings mid-column because there is no other way to stay under the 12-panel data limit.
+If a column is taller than the selected processor's data limit, the planner warns and splits strings mid-column.
