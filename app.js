@@ -26,11 +26,47 @@ const importProjectBtn = document.getElementById('import-project');
 const importProjectFile = document.getElementById('import-project-file');
 const exportNprjBtn = document.getElementById('export-nprj');
 const nprjStatusEl = document.getElementById('nprj-status');
+const panelEditorEmpty = document.getElementById('panel-editor-empty');
+const panelEditorControls = document.getElementById('panel-editor-controls');
+const selectedPanelLabel = document.getElementById('selected-panel-label');
+const selectedDataString = document.getElementById('selected-data-string');
+const selectedDataOrder = document.getElementById('selected-data-order');
+const undoPanelEditBtn = document.getElementById('undo-panel-edit');
+const zoomLevelEl = document.getElementById('zoom-level');
 
 const palette = ['#2563eb','#7c3aed','#db2777','#ea580c','#0891b2','#16a34a','#b91c1c','#4f46e5','#0f766e','#a16207'];
 let activeView = 'combined';
 let activeDragPayload = null;
 let placingNewPanel = false;
+let selectedPositionKey = null;
+let boardZoom = 1;
+const panelEditHistory = [];
+
+function snapshotPlan() {
+  return {
+    panelMap: [...currentPlan.panelMap.entries()].map(([key, panel]) => [key, { ...panel }]),
+    dataStrings: structuredClone(currentPlan.dataStrings),
+    powerStrings: structuredClone(currentPlan.powerStrings),
+    nextAddedPanelId: currentPlan.nextAddedPanelId,
+  };
+}
+
+function pushPanelUndo() {
+  if (!currentPlan) return;
+  panelEditHistory.push(snapshotPlan());
+  if (panelEditHistory.length > 25) panelEditHistory.shift();
+  undoPanelEditBtn.disabled = false;
+}
+
+function restorePlan(snapshot) {
+  currentPlan.panelMap = new Map(snapshot.panelMap);
+  currentPlan.dataStrings = snapshot.dataStrings;
+  currentPlan.powerStrings = snapshot.powerStrings;
+  currentPlan.nextAddedPanelId = snapshot.nextAddedPanelId;
+  refreshStringAssignments(currentPlan);
+  if (selectedPositionKey && !currentPlan.panelMap.has(selectedPositionKey)) selectedPositionKey = null;
+  renderMappedPlan();
+}
 
 function getInputs() {
   return {
@@ -395,6 +431,18 @@ function getProcessorIp() {
   return value;
 }
 
+function getProcessorTemplate() {
+  const processorType = document.getElementById('processor-type').value || 'MX40';
+  const templates = {
+    MX20: { file: 'mx20-vmp-template.nprj', label: 'MX20' },
+    MX30: { file: 'mx30-vmp-template.nprj', label: 'MX30' },
+    MX40: { file: 'mx40-vmp-template.nprj', label: 'MX40 Pro' },
+  };
+  const template = templates[processorType];
+  if (!template) throw new Error('Select an MX20, MX30, or MX40 processor before creating the VMP project.');
+  return { ...template, processorType };
+}
+
 function updateProjectXml(checkXml, controller, processorIp, archivePath, projectName) {
   const documentXml = new DOMParser().parseFromString(checkXml, 'application/xml');
   if (documentXml.querySelector('parsererror')) throw new Error('The template has an invalid check.xml file.');
@@ -416,7 +464,7 @@ function updateProjectXml(checkXml, controller, processorIp, archivePath, projec
   return new XMLSerializer().serializeToString(documentXml);
 }
 
-function updateScreenConfig(screenConfig, plan, cabinetIds) {
+function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel) {
   const canvases = screenConfig.screens?.flatMap((screen) => screen.canvases || []) || [];
   if (!canvases.length) throw new Error('The selected controller template has no screen canvas.');
   const cabinetPool = canvases.flatMap((canvas) => canvas.cabinets || []);
@@ -453,7 +501,7 @@ function updateScreenConfig(screenConfig, plan, cabinetIds) {
     const outputOffset = outputOffsets.get(assignment.outputID) || 0;
     const templateRecord = outputCabinets[outputOffset];
     if (!templateRecord?.cabinetId) {
-      throw new Error(`The MX40 template does not have enough cabinet records for Port ${assignment.outputID - 2047}.`);
+      throw new Error(`The ${processorLabel} template does not have enough cabinet records for Port ${assignment.outputID - 2047}. Add panels to an available port or provide a ${processorLabel} VMP template that uses this port.`);
     }
     outputOffsets.set(assignment.outputID, outputOffset + 1);
     const [col, row] = position;
@@ -513,8 +561,9 @@ async function createNprj() {
   if (!window.JSZip) throw new Error('The ZIP library did not load. Check the internet connection and try again.');
   if (!currentPlan) renderCurrentPlan();
 
-  const templateResponse = await fetch('./mx40-vmp-template.nprj');
-  if (!templateResponse.ok) throw new Error('The MX40 VMP template could not be loaded.');
+  const template = getProcessorTemplate();
+  const templateResponse = await fetch(`./${template.file}`);
+  if (!templateResponse.ok) throw new Error(`The ${template.label} VMP template could not be loaded.`);
   const outerZip = await JSZip.loadAsync(await templateResponse.arrayBuffer());
   const checkEntry = outerZip.file('check.xml');
   if (!checkEntry) throw new Error('This is not a VMP project: check.xml is missing.');
@@ -535,7 +584,7 @@ async function createNprj() {
     throw new Error(`The template contains only ${cabinetIds.length} exact cabinet IDs for ${currentPlan.totalPanels} panels.`);
   }
   const screenConfig = JSON.parse(rawScreenConfig);
-  controllerZip.file(configPath, serializeNovaConfig(updateScreenConfig(screenConfig, currentPlan, cabinetIds)));
+  controllerZip.file(configPath, serializeNovaConfig(updateScreenConfig(screenConfig, currentPlan, cabinetIds, template.label)));
 
   const meta = getJobMeta();
   const projectName = meta.jobName || meta.clientName || 'LED Wall';
@@ -560,7 +609,7 @@ async function createNprj() {
   const filename = `${safeFilename(projectName)}-${processorIp.replaceAll('.', '-')}.nprj`;
   const output = await outerZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   downloadFile(filename, output, 'application/octet-stream');
-  setNprjStatus(`Created ${filename}: ${currentPlan.totalPanels} cabinets mapped across ${currentPlan.dataStrings.length} ports on ${processorIp}, using the Internal source.`);
+  setNprjStatus(`Created ${filename}: ${template.label} with ${currentPlan.totalPanels} cabinets mapped across ${currentPlan.dataStrings.length} ports on ${processorIp}, using the Internal source.`);
 }
 
 function exportProject() {
@@ -657,7 +706,7 @@ function importProject(project) {
   document.getElementById('job-name').value = typeof meta.jobName === 'string' ? meta.jobName : '';
   document.getElementById('client-name').value = typeof meta.clientName === 'string' ? meta.clientName : '';
   document.getElementById('install-date').value = typeof meta.installDate === 'string' ? meta.installDate : '';
-  document.getElementById('processor-type').value = ['MX20', 'MX30', 'MX40'].includes(meta.processorType) ? meta.processorType : '';
+  document.getElementById('processor-type').value = ['MX20', 'MX30', 'MX40'].includes(meta.processorType) ? meta.processorType : 'MX40';
   document.getElementById('ip-address').value = typeof meta.ipAddress === 'string' ? meta.ipAddress : '';
   document.getElementById('job-notes').value = typeof meta.jobNotes === 'string' ? meta.jobNotes : '';
   renderPlan(plan);
@@ -744,6 +793,7 @@ function createBoardView(plan, view) {
       }
       const bg = view === 'power' ? plan.powerStrings[panel.powerStringId - 1]?.color : plan.dataStrings[panel.dataStringId - 1]?.color;
       tile.className = `panel${panel.isDataStart ? ' start-panel' : ''}${panel.isDataEnd ? ' end-panel' : ''}${panel.isPowerStart ? ' power-start-panel' : ''}`;
+      if (tile.dataset.positionKey === selectedPositionKey) tile.classList.add('selected-panel');
       if (view === 'power') tile.classList.add('power-mode-panel');
       tile.style.background = bg ?? '#334155';
       tile.dataset.key = `${panel.col}:${panel.row}`;
@@ -753,6 +803,11 @@ function createBoardView(plan, view) {
       tile.querySelector('.panel-delete').addEventListener('click', (event) => {
         event.stopPropagation();
         deletePanelAt(tile.dataset.positionKey);
+      });
+      tile.addEventListener('click', () => {
+        selectedPositionKey = tile.dataset.positionKey;
+        renderBoardViews(currentPlan);
+        renderPanelEditor();
       });
       addPanelDragHandlers(tile);
       board.appendChild(tile);
@@ -802,9 +857,12 @@ function movePanel(sourceKey, targetKey) {
   const sourcePanel = currentPlan.panelMap.get(sourceKey);
   const targetPanel = currentPlan.panelMap.get(targetKey);
   if (!sourcePanel) return;
+  pushPanelUndo();
   currentPlan.panelMap.delete(sourceKey);
   if (targetPanel) currentPlan.panelMap.set(sourceKey, targetPanel);
   currentPlan.panelMap.set(targetKey, sourcePanel);
+  if (selectedPositionKey === sourceKey) selectedPositionKey = targetKey;
+  else if (selectedPositionKey === targetKey) selectedPositionKey = sourceKey;
   updateLayoutMetrics(currentPlan);
   renderMappedPlan();
 }
@@ -823,6 +881,7 @@ function appendPanelToString(strings, sourcePanel, kind, limit) {
 }
 
 function addPanelAt(targetKey) {
+  pushPanelUndo();
   const addedId = currentPlan.nextAddedPanelId++;
   const sourcePanel = { col: currentPlan.width + addedId - 1, row: -1, addedLabel: `ADDED PANEL ${addedId}` };
   const panel = {
@@ -843,10 +902,12 @@ function addPanelAt(targetKey) {
 function deletePanelAt(positionKey) {
   const panel = currentPlan.panelMap.get(positionKey);
   if (!panel) return;
+  pushPanelUndo();
   currentPlan.panelMap.delete(positionKey);
   currentPlan.dataStrings.forEach((string) => { string.panels = string.panels.filter((source) => !sameSourcePanel(source, panel)); });
   currentPlan.powerStrings.forEach((string) => { string.panels = string.panels.filter((source) => !sameSourcePanel(source, panel)); });
   refreshStringAssignments(currentPlan);
+  if (selectedPositionKey === positionKey) selectedPositionKey = null;
   renderMappedPlan();
 }
 
@@ -857,6 +918,47 @@ function renderMappedPlan() {
   renderPixelMap(currentPlan);
   renderBoardViews(currentPlan);
   renderStrings(currentPlan);
+  renderPanelEditor();
+}
+
+function getSelectedPanel() {
+  return selectedPositionKey ? currentPlan?.panelMap.get(selectedPositionKey) : null;
+}
+
+function movePanelToDataString(positionKey, targetStringId, requestedOrder) {
+  const panel = currentPlan.panelMap.get(positionKey);
+  if (!panel) return;
+  const sourceString = currentPlan.dataStrings.find((string) => string.panels.some((item) => sameSourcePanel(item, panel)));
+  let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
+  if (!targetString) {
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: 12, panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    currentPlan.dataStrings.push(targetString);
+  }
+  const sameString = sourceString === targetString;
+  if (!sameString && targetString.panels.length >= targetString.limit) {
+    renderWarnings([`Data String ${targetString.id} is full (${targetString.limit}/${targetString.limit}).`]);
+    return;
+  }
+  pushPanelUndo();
+  if (sourceString) sourceString.panels = sourceString.panels.filter((item) => !sameSourcePanel(item, panel));
+  const maxOrder = targetString.panels.length + 1;
+  const order = Math.max(1, Math.min(Number(requestedOrder) || maxOrder, maxOrder));
+  targetString.panels.splice(order - 1, 0, { col: panel.col, row: panel.row, ...(panel.addedLabel ? { addedLabel: panel.addedLabel } : {}) });
+  refreshStringAssignments(currentPlan);
+  renderMappedPlan();
+}
+
+function renderPanelEditor() {
+  const panel = getSelectedPanel();
+  panelEditorEmpty.hidden = Boolean(panel);
+  panelEditorControls.hidden = !panel;
+  if (!panel) return;
+  const position = selectedPositionKey.split(':').map(Number);
+  selectedPanelLabel.textContent = `Selected C${position[0] + 1}/R${currentPlan.layoutHeight - position[1]}`;
+  selectedDataString.innerHTML = currentPlan.dataStrings.map((string) => `<option value="${string.id}">String ${string.id} (${string.panels.length}/${string.limit})</option>`).join('') + `<option value="new">＋ New string</option>`;
+  selectedDataString.value = String(panel.dataStringId);
+  selectedDataOrder.max = String(currentPlan.dataStrings.find((string) => string.id === panel.dataStringId)?.panels.length || 1);
+  selectedDataOrder.value = String(panel.dataOrderInString || 1);
 }
 
 function getCenter(el) {
@@ -907,6 +1009,22 @@ function renderBoardViews(plan) {
   boardViewsEl.innerHTML = '';
   ['combined', 'data', 'power'].forEach((view) => boardViewsEl.appendChild(createBoardView(plan, view)));
   syncActiveView();
+  applyBoardZoom();
+}
+
+function applyBoardZoom() {
+  boardZoom = Math.max(0.5, Math.min(1.75, boardZoom));
+  document.querySelectorAll('.board-scale-wrap').forEach((wrap) => { wrap.style.zoom = String(boardZoom); });
+  zoomLevelEl.textContent = `${Math.round(boardZoom * 100)}%`;
+}
+
+function fitBoardToView() {
+  const active = boardViewsEl.querySelector('.board-view.active');
+  const shell = active?.querySelector('.board-shell');
+  const board = active?.querySelector('.board');
+  if (!shell || !board) return;
+  boardZoom = Math.max(0.5, Math.min(1.75, (shell.clientWidth - 14) / Math.max(1, board.scrollWidth)));
+  applyBoardZoom();
 }
 
 function getMappedPanel(plan, panel) {
@@ -938,10 +1056,12 @@ function renderStrings(plan) {
       const last = getStringPanelPosition(plan, string.panels[string.panels.length - 1]);
       const card = document.createElement('article');
       card.className = 'string-item card-lite';
+      card.dataset.kind = kind;
+      card.dataset.stringId = String(string.id);
       card.innerHTML = `
         <div class="string-title">
           <h3><span class="swatch" style="background:${string.color}"></span>${title.slice(0, -1)} ${string.id}</h3>
-          <strong>${kind === 'data' ? `Port ${string.id}` : `20A ${string.id}`}</strong>
+          <div><strong>${kind === 'data' ? `Port ${string.id}` : `20A ${string.id}`}</strong><div class="string-capacity">${string.panels.length}/${string.limit} panels</div></div>
         </div>
         <div class="string-meta">
           <div><strong>Start position:</strong> Col ${first.col + 1}, Row ${plan.layoutHeight - first.row}</div>
@@ -950,6 +1070,20 @@ function renderStrings(plan) {
           <div><strong>${kind === 'data' ? 'Jumpers' : 'Power jumpers'}:</strong> ${Math.max(0, string.panels.length - 1)}</div>
         </div>
         <p class="string-route codeish"><strong>Route:</strong> ${string.panels.map((panel) => { const position = getStringPanelPosition(plan, panel); return `C${position.col + 1}/R${plan.layoutHeight - position.row}`; }).join(' → ')}</p>`;
+      if (kind === 'data') {
+        card.addEventListener('dragover', (event) => {
+          if (!activeDragPayload || activeDragPayload === 'NEW_PANEL') return;
+          event.preventDefault();
+          card.classList.add('string-drop-target');
+        });
+        card.addEventListener('dragleave', () => card.classList.remove('string-drop-target'));
+        card.addEventListener('drop', (event) => {
+          event.preventDefault();
+          card.classList.remove('string-drop-target');
+          const positionKey = event.dataTransfer.getData('text/plain') || activeDragPayload;
+          if (positionKey && positionKey !== 'NEW_PANEL') movePanelToDataString(positionKey, string.id, string.panels.length + 1);
+        });
+      }
       section.appendChild(card);
     });
     stringsEl.appendChild(section);
@@ -1013,6 +1147,9 @@ function syncActiveView() {
 
 function renderPlan(plan) {
   currentPlan = plan;
+  selectedPositionKey = null;
+  panelEditHistory.length = 0;
+  undoPanelEditBtn.disabled = true;
   applyPrintSizing(plan);
   renderPrintMeta(plan);
   renderWarnings(plan.warnings);
@@ -1020,6 +1157,7 @@ function renderPlan(plan) {
   renderPixelMap(plan);
   renderBoardViews(plan);
   renderStrings(plan);
+  renderPanelEditor();
 }
 
 function renderCurrentPlan() {
@@ -1040,7 +1178,39 @@ viewToggleEl.addEventListener('click', (event) => {
   if (!btn?.dataset.view) return;
   activeView = btn.dataset.view;
   syncActiveView();
+  applyBoardZoom();
 });
+
+selectedDataString.addEventListener('change', () => {
+  if (!selectedPositionKey) return;
+  const targetId = selectedDataString.value === 'new' ? currentPlan.dataStrings.length + 1 : Number(selectedDataString.value);
+  movePanelToDataString(selectedPositionKey, targetId);
+});
+
+selectedDataOrder.addEventListener('change', () => {
+  const panel = getSelectedPanel();
+  if (panel) movePanelToDataString(selectedPositionKey, panel.dataStringId, Number(selectedDataOrder.value));
+});
+
+document.getElementById('move-panel-earlier').addEventListener('click', () => {
+  const panel = getSelectedPanel();
+  if (panel) movePanelToDataString(selectedPositionKey, panel.dataStringId, panel.dataOrderInString - 1);
+});
+document.getElementById('move-panel-later').addEventListener('click', () => {
+  const panel = getSelectedPanel();
+  if (panel) movePanelToDataString(selectedPositionKey, panel.dataStringId, panel.dataOrderInString + 1);
+});
+document.getElementById('remove-selected-panel').addEventListener('click', () => {
+  if (selectedPositionKey) deletePanelAt(selectedPositionKey);
+});
+undoPanelEditBtn.addEventListener('click', () => {
+  const snapshot = panelEditHistory.pop();
+  if (snapshot) restorePlan(snapshot);
+  undoPanelEditBtn.disabled = panelEditHistory.length === 0;
+});
+document.getElementById('zoom-out').addEventListener('click', () => { boardZoom -= 0.1; applyBoardZoom(); });
+document.getElementById('zoom-in').addEventListener('click', () => { boardZoom += 0.1; applyBoardZoom(); });
+document.getElementById('zoom-fit').addEventListener('click', fitBoardToView);
 
 exportPdfBtn.addEventListener('click', () => {
   if (currentPlan) renderPrintMeta(currentPlan);

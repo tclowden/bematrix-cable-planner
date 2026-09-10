@@ -45,7 +45,7 @@
             <option value="">Select processor</option>
             <option value="MX20">MX20</option>
             <option value="MX30">MX30</option>
-            <option value="MX40">MX40</option>
+            <option value="MX40" selected>MX40</option>
           </select>
         </label>
         <label>
@@ -121,6 +121,25 @@
           <div id="delete-panel-zone" class="mapping-tool delete-panel-zone">
             <strong>Delete panel</strong>
             <span>Drag a panel here</span>
+          </div>
+        </div>
+        <div class="panel-editor" id="panel-editor">
+          <div class="panel-editor-empty" id="panel-editor-empty">Select a panel to change its data string or connection order.</div>
+          <div class="panel-editor-controls" id="panel-editor-controls" hidden>
+            <strong id="selected-panel-label">Selected panel</strong>
+            <label>Data string <select id="selected-data-string"></select></label>
+            <label>Order <input id="selected-data-order" type="number" min="1" step="1" /></label>
+            <button id="move-panel-earlier" type="button" class="toggle-btn">← Earlier</button>
+            <button id="move-panel-later" type="button" class="toggle-btn">Later →</button>
+            <button id="remove-selected-panel" type="button" class="toggle-btn danger-btn">Remove</button>
+          </div>
+          <div class="board-zoom" aria-label="Panel view zoom controls">
+            <button id="undo-panel-edit" type="button" class="toggle-btn" disabled>Undo</button>
+            <span class="toolbar-divider"></span>
+            <button id="zoom-out" type="button" class="toggle-btn" aria-label="Zoom out">−</button>
+            <strong id="zoom-level">100%</strong>
+            <button id="zoom-in" type="button" class="toggle-btn" aria-label="Zoom in">+</button>
+            <button id="zoom-fit" type="button" class="toggle-btn">Fit</button>
           </div>
         </div>
         <div class="legend legend-combined active" data-legend="combined">
