@@ -571,17 +571,34 @@ function updateScreenConfig(screenConfig, plan, cabinetIds, processorLabel, proc
   targetCanvas.position = { x: 0, y: 0 };
   targetCanvas.isCustomSize = true;
   const screen = screenConfig.screens[0];
-  screen.workingMode = 0;
-  const internalLayout = screen.layersInWorkingMode?.find((layout) => layout.workingMode === 0);
+  // Working mode 0 uses VMP's simplified synchronized layer layout, which only
+  // exposes Layer Name and Switch Source. Working mode 1 is the editable layer
+  // layout and retains Position/Size, Border, and Crop controls.
+  screen.workingMode = 1;
+  const internalLayout = screen.layersInWorkingMode?.find((layout) => layout.workingMode === 1);
   if (internalLayout?.layers?.length) {
     const layer = internalLayout.layers[0];
     layer.source = 224;
     layer.position = { x: 0, y: 0 };
     layer.scaler = { width: plan.pixelWidth, height: plan.pixelHeight };
-    layer.layerInCanvasId = targetCanvas.canvasID;
+    layer.cut = {
+      enable: false,
+      rect: {
+        x: 0,
+        y: 0,
+        width: layer.sourceSize?.width || plan.pixelWidth,
+        height: layer.sourceSize?.height || plan.pixelHeight,
+      },
+    };
+    layer.border = layer.border || {
+      enable: false,
+      width: 0,
+      color: { r: 255, g: 0, b: 0 },
+    };
+    layer.layerInCanvasId = 0;
     layer.followState = false;
   }
-  const internalCanvas = targetCanvas.canvasInWorkingMode?.find((entry) => entry.workingMode === 0);
+  const internalCanvas = targetCanvas.canvasInWorkingMode?.find((entry) => entry.workingMode === 1);
   if (internalCanvas) {
     internalCanvas.size = { width: plan.pixelWidth, height: plan.pixelHeight };
     internalCanvas.isCustomSize = true;
@@ -595,12 +612,11 @@ function serializeNovaConfig(config) {
 
 function setInternalOutputSource(outputConfig) {
   (outputConfig.OutputConfigs || []).forEach((config) => {
-    const internal = config.outputSyncParas?.find((entry) => entry.WorkingMode === 0);
-    if (internal) {
-      internal.SelectSource = 224;
-      internal.InputId = 102;
-      internal.SourceName = 'internal-source';
-    }
+    (config.outputSyncParas || []).forEach((entry) => {
+      entry.SelectSource = 224;
+      entry.InputId = 102;
+      entry.SourceName = 'internal-source';
+    });
   });
   return outputConfig;
 }
