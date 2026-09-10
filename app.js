@@ -43,6 +43,7 @@ let selectedPositionKeys = new Set();
 let boardZoom = 1;
 const panelEditHistory = [];
 let suppressNextEmptyClick = false;
+const boardScrollPositions = new Map();
 
 function getDataStringLimit(processorType = document.getElementById('processor-type').value || 'MX40') {
   return processorType === 'MX40' ? 16 : 12;
@@ -1210,10 +1211,24 @@ function drawPathsForView(plan, view, svg, board) {
 }
 
 function renderBoardViews(plan) {
+  boardViewsEl.querySelectorAll('.board-view').forEach((view) => {
+    const shell = view.querySelector('.board-shell');
+    if (shell) boardScrollPositions.set(view.dataset.view, { left: shell.scrollLeft, top: shell.scrollTop });
+  });
   boardViewsEl.innerHTML = '';
   ['combined', 'data', 'power'].forEach((view) => boardViewsEl.appendChild(createBoardView(plan, view)));
   syncActiveView();
   applyBoardZoom();
+  requestAnimationFrame(() => {
+    boardViewsEl.querySelectorAll('.board-view').forEach((view) => {
+      const shell = view.querySelector('.board-shell');
+      const saved = boardScrollPositions.get(view.dataset.view);
+      if (shell && saved) {
+        shell.scrollLeft = saved.left;
+        shell.scrollTop = saved.top;
+      }
+    });
+  });
 }
 
 function applyBoardZoom() {
@@ -1354,6 +1369,8 @@ function syncActiveView() {
 
 function renderPlan(plan) {
   currentPlan = plan;
+  boardScrollPositions.clear();
+  boardViewsEl.innerHTML = '';
   selectedPositionKey = null;
   selectedPositionKeys = new Set();
   panelEditHistory.length = 0;
