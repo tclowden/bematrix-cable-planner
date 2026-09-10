@@ -47,6 +47,7 @@ button:hover { filter: brightness(1.05); }
 .board-card,.string-card { padding: 20px; min-width: 0; }
 .section-head { margin-bottom: 16px; }
 .section-head p { color: var(--muted); margin-bottom: 0; }
+.section-head .board-navigation-help { margin-top:6px; color:#2563eb; font-size:.82rem; font-weight:700; }
 .print-header { display: none; }
 .print-brand { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; }
 .print-logo { width: 180px; height: auto; }
@@ -89,6 +90,8 @@ button:hover { filter: brightness(1.05); }
 .board-view.active { display: block; }
 .view-title { margin-bottom: 10px; }
 .board-shell { position: relative; overflow: auto; max-width: 100%; padding: 6px; border-radius: 20px; background: linear-gradient(180deg,#eef2ff 0%,#f8fafc 100%); border: 1px solid var(--border); }
+.board-shell { cursor:default; }
+.board-shell.middle-panning { cursor:grabbing; user-select:none; }
 .board-scale-wrap { position: relative; width: max-content; }
 .board { position: relative; z-index: 1; display: grid; width: max-content; max-width: 100%; gap: var(--panel-gap); justify-content: start; align-content: start; }
 .board-paths { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: visible; }

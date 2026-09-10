@@ -34,7 +34,21 @@ const selectedDataOrder = document.getElementById('selected-data-order');
 const undoPanelEditBtn = document.getElementById('undo-panel-edit');
 const zoomLevelEl = document.getElementById('zoom-level');
 
-const palette = ['#2563eb','#7c3aed','#db2777','#ea580c','#0891b2','#16a34a','#b91c1c','#4f46e5','#0f766e','#a16207'];
+const stringColorPalette = [
+  '#2563eb','#f97316','#7c3aed','#059669','#db2777','#0891b2','#dc2626','#65a30d',
+  '#4f46e5','#d97706','#0f766e','#9333ea','#0284c7','#be123c','#15803d','#c2410c',
+  '#6366f1','#ca8a04','#0d9488','#a21caf','#0369a1','#e11d48','#16a34a','#ea580c',
+  '#4338ca','#a16207','#14b8a6','#86198f','#075985','#9f1239','#166534','#9a3412',
+];
+
+function getStringColor(kind, index) {
+  const slot = (index * 2) + (kind === 'power' ? 1 : 0);
+  if (slot < stringColorPalette.length) return stringColorPalette[slot];
+  const hue = (slot * 137.508) % 360;
+  const saturation = [68, 76, 84, 62, 80][slot % 5];
+  const lightness = [38, 46, 54, 42, 50, 34, 58][slot % 7];
+  return `hsl(${hue.toFixed(2)}, ${saturation}%, ${lightness}%)`;
+}
 let activeView = 'combined';
 let activeDragPayload = null;
 let placingNewPanel = false;
@@ -44,6 +58,8 @@ let boardZoom = 1;
 const panelEditHistory = [];
 let suppressNextEmptyClick = false;
 const boardScrollPositions = new Map();
+const MIN_BOARD_ZOOM = 0.15;
+const MAX_BOARD_ZOOM = 2.5;
 
 function getDataStringLimit(processorType = document.getElementById('processor-type').value || 'MX40') {
   return processorType === 'MX40' ? 16 : 12;
@@ -168,8 +184,8 @@ function planLayout(width, height, powerMode, processorType = 'MX40') {
   const dataLimit = getDataStringLimit(processorType);
   const dataResult = buildStrings(width, height, dataLimit, 'data', true);
   const powerResult = buildStrings(width, height, powerMode === 'limited' ? 15 : 12, 'power', powerMode !== 'limited');
-  const dataStrings = dataResult.strings.map((string, i) => ({ ...string, port: string.id, color: palette[i % palette.length] }));
-  const powerStrings = powerResult.strings.map((string, i) => ({ ...string, outlet: string.id, color: palette[(i + 4) % palette.length] }));
+  const dataStrings = dataResult.strings.map((string, i) => ({ ...string, port: string.id, color: getStringColor('data', i) }));
+  const powerStrings = powerResult.strings.map((string, i) => ({ ...string, outlet: string.id, color: getStringColor('power', i) }));
   const warnings = [...dataResult.warnings, ...powerResult.warnings];
   if (powerMode === 'limited' && powerStrings.length < dataStrings.length) warnings.unshift(`Limited power mode is active: data uses ${dataStrings.length} strings, power uses ${powerStrings.length} strings.`);
   return {
@@ -229,7 +245,7 @@ function refreshStringAssignments(plan) {
   plan.dataStrings.forEach((string, stringIndex) => {
     string.id = stringIndex + 1;
     string.port = string.id;
-    string.color = palette[stringIndex % palette.length];
+    string.color = getStringColor('data', stringIndex);
     string.panels.forEach((sourcePanel, index) => {
       const panel = [...plan.panelMap.values()].find((mapped) => sameSourcePanel(mapped, sourcePanel));
       if (!panel) return;
@@ -246,7 +262,7 @@ function refreshStringAssignments(plan) {
   plan.powerStrings.forEach((string, stringIndex) => {
     string.id = stringIndex + 1;
     string.outlet = string.id;
-    string.color = palette[(stringIndex + 4) % palette.length];
+    string.color = getStringColor('power', stringIndex);
     string.panels.forEach((sourcePanel, index) => {
       const panel = [...plan.panelMap.values()].find((mapped) => sameSourcePanel(mapped, sourcePanel));
       if (!panel) return;
@@ -678,7 +694,7 @@ function buildImportedStrings(panels, kind, limit) {
       kind,
       limit,
       panels: entries.sort((a, b) => a.order - b.order).map((entry) => entry.source),
-      color: palette[(kind === 'power' ? index + 4 : index) % palette.length],
+      color: getStringColor(kind, index),
       ...(kind === 'data' ? { port: index + 1 } : { outlet: index + 1 }),
     }));
 }
@@ -847,9 +863,56 @@ function createBoardView(plan, view) {
     }
   }
   setupMarqueeSelection(wrap.querySelector('.board-scale-wrap'), board);
+  setupBoardNavigation(wrap.querySelector('.board-shell'));
   drawPathsForView(plan, view, wrap.querySelector('.board-paths'), board);
   applyBoardPrintScale(wrap, board);
   return wrap;
+}
+
+function setBoardZoom(nextZoom, focalPoint = null) {
+  const previousZoom = boardZoom;
+  boardZoom = Math.max(MIN_BOARD_ZOOM, Math.min(MAX_BOARD_ZOOM, nextZoom));
+  if (boardZoom === previousZoom) return;
+  const shell = focalPoint?.shell;
+  let contentX;
+  let contentY;
+  if (shell) {
+    const rect = shell.getBoundingClientRect();
+    contentX = (shell.scrollLeft + focalPoint.clientX - rect.left) / previousZoom;
+    contentY = (shell.scrollTop + focalPoint.clientY - rect.top) / previousZoom;
+  }
+  applyBoardZoom();
+  if (shell) {
+    const rect = shell.getBoundingClientRect();
+    shell.scrollLeft = (contentX * boardZoom) - (focalPoint.clientX - rect.left);
+    shell.scrollTop = (contentY * boardZoom) - (focalPoint.clientY - rect.top);
+  }
+}
+
+function setupBoardNavigation(shell) {
+  shell.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+    setBoardZoom(boardZoom * factor, { shell, clientX: event.clientX, clientY: event.clientY });
+  }, { passive: false });
+  shell.addEventListener('pointerdown', (event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    const start = { x: event.clientX, y: event.clientY, left: shell.scrollLeft, top: shell.scrollTop };
+    shell.classList.add('middle-panning');
+    const pan = (pointerEvent) => {
+      shell.scrollLeft = start.left - (pointerEvent.clientX - start.x);
+      shell.scrollTop = start.top - (pointerEvent.clientY - start.y);
+    };
+    const finish = () => {
+      shell.classList.remove('middle-panning');
+      window.removeEventListener('pointermove', pan);
+      window.removeEventListener('pointerup', finish);
+    };
+    window.addEventListener('pointermove', pan);
+    window.addEventListener('pointerup', finish);
+  });
+  shell.addEventListener('auxclick', (event) => { if (event.button === 1) event.preventDefault(); });
 }
 
 function setupMarqueeSelection(wrap, board) {
@@ -984,8 +1047,7 @@ function appendPanelToString(strings, sourcePanel, kind, limit) {
   let string = strings[strings.length - 1];
   if (!string || string.panels.length >= limit) {
     const id = strings.length + 1;
-    const colorIndex = kind === 'power' ? id + 3 : id - 1;
-    string = { id, kind, limit, panels: [], color: palette[colorIndex % palette.length] };
+    string = { id, kind, limit, panels: [], color: getStringColor(kind, id - 1) };
     if (kind === 'data') string.port = id;
     else string.outlet = id;
     strings.push(string);
@@ -1077,7 +1139,7 @@ function movePanelToDataString(positionKey, targetStringId, requestedOrder) {
   const sourceString = currentPlan.dataStrings.find((string) => string.panels.some((item) => sameSourcePanel(item, panel)));
   let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
   if (!targetString) {
-    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: getStringColor('data', currentPlan.dataStrings.length) };
     currentPlan.dataStrings.push(targetString);
   }
   const sameString = sourceString === targetString;
@@ -1102,7 +1164,7 @@ function moveSelectedPanelsToDataString(targetStringId) {
   }
   let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
   if (!targetString) {
-    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: getDataStringLimit(currentPlan.processorType), panels: [], color: getStringColor('data', currentPlan.dataStrings.length) };
     currentPlan.dataStrings.push(targetString);
   }
   const selectedSources = currentPlan.dataStrings.flatMap((string) => string.panels).filter((source) => selectedPanels.some((panel) => sameSourcePanel(source, panel)));
@@ -1232,7 +1294,7 @@ function renderBoardViews(plan) {
 }
 
 function applyBoardZoom() {
-  boardZoom = Math.max(0.5, Math.min(1.75, boardZoom));
+  boardZoom = Math.max(MIN_BOARD_ZOOM, Math.min(MAX_BOARD_ZOOM, boardZoom));
   document.querySelectorAll('.board-scale-wrap').forEach((wrap) => { wrap.style.zoom = String(boardZoom); });
   zoomLevelEl.textContent = `${Math.round(boardZoom * 100)}%`;
 }
@@ -1242,7 +1304,7 @@ function fitBoardToView() {
   const shell = active?.querySelector('.board-shell');
   const board = active?.querySelector('.board');
   if (!shell || !board) return;
-  boardZoom = Math.max(0.5, Math.min(1.75, (shell.clientWidth - 14) / Math.max(1, board.scrollWidth)));
+  boardZoom = Math.max(MIN_BOARD_ZOOM, Math.min(MAX_BOARD_ZOOM, (shell.clientWidth - 14) / Math.max(1, board.scrollWidth)));
   applyBoardZoom();
 }
 
@@ -1441,8 +1503,8 @@ undoPanelEditBtn.addEventListener('click', () => {
   if (snapshot) restorePlan(snapshot);
   undoPanelEditBtn.disabled = panelEditHistory.length === 0;
 });
-document.getElementById('zoom-out').addEventListener('click', () => { boardZoom -= 0.1; applyBoardZoom(); });
-document.getElementById('zoom-in').addEventListener('click', () => { boardZoom += 0.1; applyBoardZoom(); });
+document.getElementById('zoom-out').addEventListener('click', () => setBoardZoom(boardZoom - 0.1));
+document.getElementById('zoom-in').addEventListener('click', () => setBoardZoom(boardZoom + 0.1));
 document.getElementById('zoom-fit').addEventListener('click', fitBoardToView);
 
 exportPdfBtn.addEventListener('click', () => {

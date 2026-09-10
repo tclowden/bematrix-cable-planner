@@ -9,6 +9,8 @@ Local single-page planner for beMatrix LED panel stringing.
 - snakes up/down by column
 - caps each data string at 12 panels for MX20/MX30 or 16 panels for MX40
 - supports adding panels above the existing wall and re-stringing selected panels or the entire layout in bottom-left snake order
+- supports 15%–250% board zoom, cursor-centered mouse-wheel zooming, and middle-mouse drag panning
+- assigns non-repeating colors across data and power strings, with generated shades beyond the expanded base palette
 - prefers keeping strings on full columns instead of breaking mid-column
 - counts:
   - processor/data home runs
