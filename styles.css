@@ -101,6 +101,7 @@ button:hover { filter: brightness(1.05); }
 .panel { transition:opacity .15s ease, transform .15s ease, outline-color .15s ease; }
 .empty-panel { background:rgba(255,255,255,.55); border:2px dashed #94a3b8; color:#64748b; box-shadow:none; place-items:center; text-align:center; font-size:.78rem; font-weight:700; cursor:copy; }
 .empty-panel.drop-target { background:#dbeafe; border-color:#2563eb; color:#1d4ed8; outline:none; }
+.empty-panel.top-expansion-slot { background:#ecfdf5; border-color:#34d399; color:#047857; }
 .panel.start-panel::after,.panel.end-panel::after,.panel.power-start-panel::before { content:""; position:absolute; width:14px; height:14px; border-radius:999px; }
 .panel.start-panel::after,.panel.end-panel::after { right:10px; bottom:10px; }
 .panel.power-start-panel::before { left:10px; bottom:10px; background:#f59e0b; box-shadow:0 0 0 3px rgba(255,255,255,.2); }

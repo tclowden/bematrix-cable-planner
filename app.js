@@ -787,21 +787,23 @@ function createBoardView(plan, view) {
   wrap.innerHTML = `<h3 class="view-title">${view.charAt(0).toUpperCase() + view.slice(1)} view</h3><div class="board-shell"><div class="board-scale-wrap"><svg class="board-paths" aria-hidden="true"></svg><div class="board"></div></div></div>`;
   const board = wrap.querySelector('.board');
   const workspaceWidth = plan.layoutWidth + 1;
-  const workspaceHeight = plan.layoutHeight + 1;
+  const workspaceHeight = plan.layoutHeight + 2;
   board.style.setProperty('--layout-cols', plan.layoutWidth);
   board.style.gridTemplateColumns = `repeat(${workspaceWidth}, minmax(104px, 1fr))`;
-  for (let row = 0; row < workspaceHeight; row += 1) {
+  for (let row = -1; row < workspaceHeight - 1; row += 1) {
     for (let col = 0; col < workspaceWidth; col += 1) {
-      const panel = plan.panelMap.get(`${col}:${row}`);
+      const isTopExpansion = row === -1;
+      const positionKey = isTopExpansion ? `top:${col}` : `${col}:${row}`;
+      const panel = isTopExpansion ? null : plan.panelMap.get(positionKey);
       const tile = document.createElement(panel ? 'article' : 'div');
-      tile.dataset.positionKey = `${col}:${row}`;
+      tile.dataset.positionKey = positionKey;
       tile.style.gridColumn = `${col + 1}`;
-      tile.style.gridRow = `${row + 1}`;
+      tile.style.gridRow = `${row + 2}`;
       if (!panel) {
-        tile.className = `panel empty-panel${col >= plan.layoutWidth || row >= plan.layoutHeight ? ' expansion-slot' : ''}`;
-        tile.innerHTML = '<span>Click or drop to add panel</span>';
-        tile.title = 'Click to add a panel, or drop selected panels here to move them';
-        addPanelDropHandlers(tile);
+        tile.className = `panel empty-panel${col >= plan.layoutWidth || row >= plan.layoutHeight || isTopExpansion ? ' expansion-slot' : ''}${isTopExpansion ? ' top-expansion-slot' : ''}`;
+        tile.innerHTML = `<span>${isTopExpansion ? 'Add panel above' : 'Click or drop to add panel'}</span>`;
+        tile.title = isTopExpansion ? 'Click to insert a new top row and add a panel here' : 'Click to add a panel, or drop selected panels here to move them';
+        if (!isTopExpansion) addPanelDropHandlers(tile);
         tile.addEventListener('click', () => {
           if (suppressNextEmptyClick) {
             suppressNextEmptyClick = false;
@@ -992,6 +994,22 @@ function appendPanelToString(strings, sourcePanel, kind, limit) {
 
 function addPanelAt(targetKey) {
   pushPanelUndo();
+  if (targetKey.startsWith('top:')) {
+    const targetCol = Number(targetKey.split(':')[1]);
+    currentPlan.panelMap = new Map([...currentPlan.panelMap.entries()].map(([key, panel]) => {
+      const [col, row] = key.split(':').map(Number);
+      return [`${col}:${row + 1}`, panel];
+    }));
+    selectedPositionKeys = new Set([...selectedPositionKeys].map((key) => {
+      const [col, row] = key.split(':').map(Number);
+      return `${col}:${row + 1}`;
+    }));
+    if (selectedPositionKey) {
+      const [col, row] = selectedPositionKey.split(':').map(Number);
+      selectedPositionKey = `${col}:${row + 1}`;
+    }
+    targetKey = `${targetCol}:0`;
+  }
   const addedId = currentPlan.nextAddedPanelId++;
   const sourcePanel = { col: currentPlan.width + addedId - 1, row: -1, addedLabel: `ADDED PANEL ${addedId}` };
   const panel = {
@@ -1097,6 +1115,35 @@ function moveSelectedPanelsToDataString(targetStringId) {
     string.panels = string.panels.filter((source) => !selectedPanels.some((panel) => sameSourcePanel(source, panel)));
   });
   targetString.panels.push(...selectedSources);
+  refreshStringAssignments(currentPlan);
+  renderMappedPlan();
+}
+
+function restringPanels(positionKeys) {
+  const keys = [...positionKeys].filter((key) => currentPlan.panelMap.has(key));
+  if (!keys.length) return;
+  const selectedPanels = keys.map((key) => currentPlan.panelMap.get(key));
+  const affectedStringIds = selectedPanels.map((panel) => panel.dataStringId).filter(Number.isFinite);
+  const insertionIndex = Math.max(0, Math.min(...affectedStringIds, currentPlan.dataStrings.length + 1) - 1);
+  const sourceByPosition = keys.map((key) => {
+    const [col, row] = key.split(':').map(Number);
+    const panel = currentPlan.panelMap.get(key);
+    return { col, row, source: { col: panel.col, row: panel.row, ...(panel.addedLabel ? { addedLabel: panel.addedLabel } : {}) } };
+  }).sort((a, b) => {
+    if (a.col !== b.col) return a.col - b.col;
+    return a.col % 2 === 0 ? b.row - a.row : a.row - b.row;
+  });
+  const limit = getDataStringLimit(currentPlan.processorType);
+  const replacementStrings = [];
+  for (let index = 0; index < sourceByPosition.length; index += limit) {
+    replacementStrings.push({ kind: 'data', limit, panels: sourceByPosition.slice(index, index + limit).map((entry) => entry.source) });
+  }
+  pushPanelUndo();
+  currentPlan.dataStrings.forEach((string) => {
+    string.panels = string.panels.filter((source) => !selectedPanels.some((panel) => sameSourcePanel(source, panel)));
+  });
+  currentPlan.dataStrings = currentPlan.dataStrings.filter((string) => string.panels.length > 0);
+  currentPlan.dataStrings.splice(Math.min(insertionIndex, currentPlan.dataStrings.length), 0, ...replacementStrings);
   refreshStringAssignments(currentPlan);
   renderMappedPlan();
 }
@@ -1370,6 +1417,8 @@ document.getElementById('move-panel-later').addEventListener('click', () => {
 document.getElementById('remove-selected-panel').addEventListener('click', () => {
   deleteSelectedPanels();
 });
+document.getElementById('restring-selected').addEventListener('click', () => restringPanels(selectedPositionKeys));
+document.getElementById('restring-all').addEventListener('click', () => restringPanels(currentPlan.panelMap.keys()));
 undoPanelEditBtn.addEventListener('click', () => {
   const snapshot = panelEditHistory.pop();
   if (snapshot) restorePlan(snapshot);
