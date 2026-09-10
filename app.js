@@ -425,6 +425,16 @@ function updateScreenConfig(screenConfig, plan, cabinetIds) {
   }
 
   const targetCanvas = canvases[0];
+  const cabinetRecords = cabinetPool.map((cabinet, index) => ({
+    cabinet,
+    cabinetId: cabinetIds[index],
+  }));
+  const cabinetsByOutput = new Map();
+  cabinetRecords.forEach((record) => {
+    const records = cabinetsByOutput.get(record.cabinet.outputID) || [];
+    records.push(record);
+    cabinetsByOutput.set(record.cabinet.outputID, records);
+  });
   const assignments = plan.dataStrings.flatMap((string) => string.panels.map((sourcePanel, index) => ({
     sourcePanel,
     outputID: 2048 + (string.port - 1),
@@ -435,13 +445,21 @@ function updateScreenConfig(screenConfig, plan, cabinetIds) {
     positionKey.split(':').map(Number),
   ]));
 
-  targetCanvas.cabinets = assignments.map((assignment, index) => {
+  const outputOffsets = new Map();
+  targetCanvas.cabinets = assignments.map((assignment) => {
     const position = positionBySource.get(`${assignment.sourcePanel.col}:${assignment.sourcePanel.row}`);
     if (!position) throw new Error('A data string references a panel that is not in the current layout.');
+    const outputCabinets = cabinetsByOutput.get(assignment.outputID) || [];
+    const outputOffset = outputOffsets.get(assignment.outputID) || 0;
+    const templateRecord = outputCabinets[outputOffset];
+    if (!templateRecord?.cabinetId) {
+      throw new Error(`The MX40 template does not have enough cabinet records for Port ${assignment.outputID - 2047}.`);
+    }
+    outputOffsets.set(assignment.outputID, outputOffset + 1);
     const [col, row] = position;
     return {
-      ...cabinetPool[index],
-      cabinetID: `__NOVA_CABINET_ID_${cabinetIds[index]}__`,
+      ...templateRecord.cabinet,
+      cabinetID: `__NOVA_CABINET_ID_${templateRecord.cabinetId}__`,
       connectID: assignment.connectID,
       outputID: assignment.outputID,
       pageID: 0,
