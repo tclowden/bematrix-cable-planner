@@ -381,15 +381,39 @@ function getProjectDevices(checkXml) {
   }));
 }
 
-function findTemplateController(devices, requestedIp) {
-  if (requestedIp) {
-    const match = devices.find((device) => device.ip === requestedIp);
-    if (match) return match;
-    const available = devices.map((device) => `${device.ip} (${device.model})`).join(', ');
-    throw new Error(`The controller IP does not match this template. Available controllers: ${available}.`);
-  }
-  if (devices.length === 1) return devices[0];
+function getPrimaryTemplateController(devices) {
+  if (!devices.length) throw new Error('The VMP template does not contain a controller.');
   return devices.find((device) => device.name.toLowerCase() === 'primary') || devices[0];
+}
+
+function getProcessorIp() {
+  const value = document.getElementById('ip-address').value.trim() || '192.168.0.10';
+  const octets = value.split('.');
+  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/.test(octet) || Number(octet) > 255)) {
+    throw new Error('Enter a valid IPv4 processor address, such as 192.168.0.10.');
+  }
+  return value;
+}
+
+function updateProjectXml(checkXml, controller, processorIp, archivePath, projectName) {
+  const documentXml = new DOMParser().parseFromString(checkXml, 'application/xml');
+  if (documentXml.querySelector('parsererror')) throw new Error('The template has an invalid check.xml file.');
+  const projectDevices = [...documentXml.querySelectorAll('Device')];
+  const targetDevice = projectDevices.find((device) => device.querySelector('DeviceDataFilePath')?.textContent?.trim() === controller.path);
+  if (!targetDevice) throw new Error('The primary controller could not be found in check.xml.');
+  projectDevices.forEach((device) => { if (device !== targetDevice) device.remove(); });
+  documentXml.querySelector('Devices')?.setAttribute('DeviceNumber', '1');
+  const setText = (selector, value) => {
+    const element = targetDevice.querySelector(selector);
+    if (element) element.textContent = value;
+  };
+  setText('DeviceIp', processorIp);
+  setText('DeviceDataFilePath', archivePath);
+  if (projectName) {
+    setText('ProejctName', projectName);
+    documentXml.documentElement.setAttribute('ProjectName', projectName);
+  }
+  return new XMLSerializer().serializeToString(documentXml);
 }
 
 function updateScreenConfig(screenConfig, plan) {
@@ -429,8 +453,37 @@ function updateScreenConfig(screenConfig, plan) {
   canvases.slice(1).forEach((canvas) => { canvas.cabinets = []; });
   targetCanvas.size = { width: plan.pixelWidth, height: plan.pixelHeight };
   targetCanvas.rectSize = { width: plan.pixelWidth, height: plan.pixelHeight };
+  targetCanvas.position = { x: 0, y: 0 };
   targetCanvas.isCustomSize = true;
+  const screen = screenConfig.screens[0];
+  screen.workingMode = 0;
+  const internalLayout = screen.layersInWorkingMode?.find((layout) => layout.workingMode === 0);
+  if (internalLayout?.layers?.length) {
+    const layer = internalLayout.layers[0];
+    layer.source = 224;
+    layer.position = { x: 0, y: 0 };
+    layer.scaler = { width: plan.pixelWidth, height: plan.pixelHeight };
+    layer.layerInCanvasId = targetCanvas.canvasID;
+    layer.followState = false;
+  }
+  const internalCanvas = targetCanvas.canvasInWorkingMode?.find((entry) => entry.workingMode === 0);
+  if (internalCanvas) {
+    internalCanvas.size = { width: plan.pixelWidth, height: plan.pixelHeight };
+    internalCanvas.isCustomSize = true;
+  }
   return screenConfig;
+}
+
+function setInternalOutputSource(outputConfig) {
+  (outputConfig.OutputConfigs || []).forEach((config) => {
+    const internal = config.outputSyncParas?.find((entry) => entry.WorkingMode === 0);
+    if (internal) {
+      internal.SelectSource = 224;
+      internal.InputId = 102;
+      internal.SourceName = 'internal-source';
+    }
+  });
+  return outputConfig;
 }
 
 async function createNprj() {
@@ -444,8 +497,8 @@ async function createNprj() {
   if (!checkEntry) throw new Error('This is not a VMP project: check.xml is missing.');
   const checkXml = await checkEntry.async('string');
   const devices = getProjectDevices(checkXml);
-  const requestedIp = document.getElementById('ip-address').value.trim();
-  const controller = findTemplateController(devices, requestedIp);
+  const processorIp = getProcessorIp();
+  const controller = getPrimaryTemplateController(devices);
   const controllerEntry = outerZip.file(controller.path);
   if (!controller.path || !controllerEntry) throw new Error(`The controller archive ${controller.path || '(missing)'} was not found.`);
 
@@ -455,13 +508,31 @@ async function createNprj() {
   if (!configEntry) throw new Error(`The ${controller.model} template does not contain ${configPath}.`);
   const screenConfig = JSON.parse(await configEntry.async('string'));
   controllerZip.file(configPath, `${JSON.stringify(updateScreenConfig(screenConfig, currentPlan), null, 4)}\n`);
-  outerZip.file(controller.path, await controllerZip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
 
   const meta = getJobMeta();
-  const filename = `${safeFilename(meta.jobName || meta.clientName || 'led-wall')}-${controller.ip.replaceAll('.', '-')}.nprj`;
+  const projectName = meta.jobName || meta.clientName || 'LED Wall';
+  const outputPath = `${processorIp}_project_`;
+  const customConfigPath = 'controller3.1/customconfig/deviceCustomConfig.json';
+  const customConfigEntry = controllerZip.file(customConfigPath);
+  if (customConfigEntry) {
+    const customConfig = JSON.parse(await customConfigEntry.async('string'));
+    customConfig.CustomIp = processorIp;
+    controllerZip.file(customConfigPath, `${JSON.stringify(customConfig, null, 4)}\n`);
+  }
+  const outputConfigPath = 'controller3.1/usrconfig/outputConfig.json';
+  const outputConfigEntry = controllerZip.file(outputConfigPath);
+  if (outputConfigEntry) {
+    const outputConfig = JSON.parse(await outputConfigEntry.async('string'));
+    controllerZip.file(outputConfigPath, `${JSON.stringify(setInternalOutputSource(outputConfig), null, 4)}\n`);
+  }
+  devices.forEach((device) => outerZip.remove(device.path));
+  outerZip.file(outputPath, await controllerZip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
+  outerZip.file('check.xml', updateProjectXml(checkXml, controller, processorIp, outputPath, projectName));
+
+  const filename = `${safeFilename(projectName)}-${processorIp.replaceAll('.', '-')}.nprj`;
   const output = await outerZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   downloadFile(filename, output, 'application/octet-stream');
-  setNprjStatus(`Created ${filename}: ${currentPlan.totalPanels} cabinets mapped across ${currentPlan.dataStrings.length} ports on ${controller.ip}.`);
+  setNprjStatus(`Created ${filename}: ${currentPlan.totalPanels} cabinets mapped across ${currentPlan.dataStrings.length} ports on ${processorIp}, using the Internal source.`);
 }
 
 function exportProject() {

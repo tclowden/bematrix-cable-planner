@@ -22,7 +22,7 @@ Local single-page planner for beMatrix LED panel stringing.
 
 ## VMP export
 
-Enter either `192.168.8.10` or `192.168.8.11` as the controller IP, then choose **Create VMP .nprj**. The planner uses the bundled, validated MX40 Pro V1.5 template, updates only the matching controller, preserves the other controller and device settings, and immediately downloads the generated project.
+Choose **Create VMP .nprj** to generate a single-controller MX40 Pro V1.5 project. The processor uses the IP entered in the planner, or `192.168.0.10` when blank. Its source defaults to Internal, with the generated LED layout positioned at the top-left of and scaled over the source.
 
 ## Run it
 
