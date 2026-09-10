@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>beMatrix LED Cable Planner</title>
   <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script>
+  <script src="./app.js" defer></script>
 </head>
 <body>
   <main class="shell">
@@ -66,7 +68,13 @@
           <button type="submit">Build diagram</button>
           <button id="export-pdf" type="button" class="button-secondary">Export PDF</button>
           <button id="export-pixel-map" type="button" class="button-secondary">Download pixel map JPG</button>
+          <button id="export-project" type="button" class="button-secondary">Export project JSON</button>
+          <button id="import-project" type="button" class="button-secondary">Import project JSON</button>
+          <input id="import-project-file" class="visually-hidden" type="file" accept=".json,application/json" />
+          <button id="export-nprj" type="button" class="button-secondary">Create VMP .nprj</button>
+          <input id="nprj-template-file" class="visually-hidden" type="file" accept=".nprj,.zip,application/zip" />
         </div>
+        <p id="nprj-status" class="span-2 export-status" aria-live="polite"></p>
       </form>
     </section>
 
@@ -167,6 +175,5 @@
     </article>
   </template>
 
-  <script src="./app.js"></script>
 </body>
 </html>

@@ -9,6 +9,7 @@
   --print-panel-gap: 4px;
 }
 * { box-sizing: border-box; }
+.visually-hidden { position:absolute !important; width:1px !important; height:1px !important; padding:0 !important; margin:-1px !important; overflow:hidden !important; clip:rect(0,0,0,0) !important; white-space:nowrap !important; border:0 !important; }
 body { margin: 0; font-family: Inter, system-ui, sans-serif; background: linear-gradient(180deg, #e2e8f0 0%, #f8fafc 100%); color: #0f172a; }
 .shell { width: min(1400px, calc(100vw - 32px)); margin: 0 auto; padding: 24px 0 40px; }
 .card { background: rgba(255,255,255,.94); border: 1px solid var(--border); border-radius: 24px; box-shadow: 0 24px 60px rgba(15,23,42,.08); }
@@ -149,3 +150,5 @@ button:hover { filter: brightness(1.05); }
   .board-shell,.board,.board-paths,.path-line,.power-path-line,.start-badge,.power-badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   button { display:none !important; }
 }
+.export-status { margin: 0; min-height: 1.25rem; color: #475569; }
+.export-status.error { color: #b91c1c; font-weight: 700; }

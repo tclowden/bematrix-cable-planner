@@ -21,6 +21,12 @@ const viewToggleEl = document.getElementById('view-toggle');
 const resetPanelLayoutBtn = document.getElementById('reset-panel-layout');
 const newPanelTool = document.getElementById('new-panel-tool');
 const deletePanelZone = document.getElementById('delete-panel-zone');
+const exportProjectBtn = document.getElementById('export-project');
+const importProjectBtn = document.getElementById('import-project');
+const importProjectFile = document.getElementById('import-project-file');
+const exportNprjBtn = document.getElementById('export-nprj');
+const nprjTemplateFile = document.getElementById('nprj-template-file');
+const nprjStatusEl = document.getElementById('nprj-status');
 
 const palette = ['#2563eb','#7c3aed','#db2777','#ea580c','#0891b2','#16a34a','#b91c1c','#4f46e5','#0f766e','#a16207'];
 let activeView = 'combined';
@@ -348,6 +354,219 @@ function safeFilename(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80);
+}
+
+function downloadFile(filename, contents, type) {
+  const url = URL.createObjectURL(new Blob([contents], { type }));
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = url;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function setNprjStatus(message, isError = false) {
+  nprjStatusEl.textContent = message;
+  nprjStatusEl.classList.toggle('error', isError);
+}
+
+function getProjectDevices(checkXml) {
+  const documentXml = new DOMParser().parseFromString(checkXml, 'application/xml');
+  if (documentXml.querySelector('parsererror')) throw new Error('The template has an invalid check.xml file.');
+  return [...documentXml.querySelectorAll('Device')].map((device) => ({
+    element: device,
+    ip: device.querySelector('DeviceIp')?.textContent?.trim() || '',
+    model: device.querySelector('DeviceTypeName')?.textContent?.trim() || 'Unknown controller',
+    path: device.querySelector('DeviceDataFilePath')?.textContent?.trim() || '',
+  }));
+}
+
+function findTemplateController(devices, requestedIp) {
+  if (requestedIp) {
+    const match = devices.find((device) => device.ip === requestedIp);
+    if (match) return match;
+  }
+  if (devices.length === 1) return devices[0];
+  const available = devices.map((device) => `${device.ip} (${device.model})`).join(', ');
+  throw new Error(`Enter the controller IP from the template. Available controllers: ${available}.`);
+}
+
+function updateScreenConfig(screenConfig, plan) {
+  const canvases = screenConfig.screens?.flatMap((screen) => screen.canvases || []) || [];
+  if (!canvases.length) throw new Error('The selected controller template has no screen canvas.');
+  const cabinetPool = canvases.flatMap((canvas) => canvas.cabinets || []);
+  if (plan.totalPanels > cabinetPool.length) {
+    throw new Error(`This template contains ${cabinetPool.length} cabinet records, but the plan needs ${plan.totalPanels}. Use a template with at least that many cabinets.`);
+  }
+
+  const targetCanvas = canvases[0];
+  const assignments = plan.dataStrings.flatMap((string) => string.panels.map((sourcePanel, index) => ({
+    sourcePanel,
+    outputID: 2048 + (string.port - 1),
+    connectID: index,
+  })));
+  const positionBySource = new Map([...plan.panelMap.entries()].map(([positionKey, panel]) => [
+    `${panel.col}:${panel.row}`,
+    positionKey.split(':').map(Number),
+  ]));
+
+  targetCanvas.cabinets = assignments.map((assignment, index) => {
+    const position = positionBySource.get(`${assignment.sourcePanel.col}:${assignment.sourcePanel.row}`);
+    if (!position) throw new Error('A data string references a panel that is not in the current layout.');
+    const [col, row] = position;
+    return {
+      ...cabinetPool[index],
+      connectID: assignment.connectID,
+      outputID: assignment.outputID,
+      pageID: 0,
+      position: { x: col * 192, y: row * 192 },
+      size: { width: 192, height: 192 },
+      angle: 0,
+      lockStatus: false,
+    };
+  });
+  canvases.slice(1).forEach((canvas) => { canvas.cabinets = []; });
+  targetCanvas.size = { width: plan.pixelWidth, height: plan.pixelHeight };
+  targetCanvas.rectSize = { width: plan.pixelWidth, height: plan.pixelHeight };
+  targetCanvas.isCustomSize = true;
+  return screenConfig;
+}
+
+async function createNprj(templateFile) {
+  if (!window.JSZip) throw new Error('The ZIP library did not load. Check the internet connection and try again.');
+  if (!templateFile) return;
+  if (templateFile.size > 50 * 1024 * 1024) throw new Error('The VMP template must be smaller than 50 MB.');
+  if (!currentPlan) renderCurrentPlan();
+
+  const outerZip = await JSZip.loadAsync(templateFile);
+  const checkEntry = outerZip.file('check.xml');
+  if (!checkEntry) throw new Error('This is not a VMP project: check.xml is missing.');
+  const checkXml = await checkEntry.async('string');
+  const devices = getProjectDevices(checkXml);
+  const requestedIp = document.getElementById('ip-address').value.trim();
+  const controller = findTemplateController(devices, requestedIp);
+  const controllerEntry = outerZip.file(controller.path);
+  if (!controller.path || !controllerEntry) throw new Error(`The controller archive ${controller.path || '(missing)'} was not found.`);
+
+  const controllerZip = await JSZip.loadAsync(await controllerEntry.async('uint8array'));
+  const configPath = 'controller3.1/usrconfig/screenConfig.json';
+  const configEntry = controllerZip.file(configPath);
+  if (!configEntry) throw new Error(`The ${controller.model} template does not contain ${configPath}.`);
+  const screenConfig = JSON.parse(await configEntry.async('string'));
+  controllerZip.file(configPath, `${JSON.stringify(updateScreenConfig(screenConfig, currentPlan), null, 4)}\n`);
+  outerZip.file(controller.path, await controllerZip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
+
+  const meta = getJobMeta();
+  const filename = `${safeFilename(meta.jobName || meta.clientName || 'led-wall')}-${controller.ip.replaceAll('.', '-')}.nprj`;
+  const output = await outerZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  downloadFile(filename, output, 'application/octet-stream');
+  setNprjStatus(`Created ${filename}: ${currentPlan.totalPanels} cabinets mapped across ${currentPlan.dataStrings.length} ports on ${controller.ip}.`);
+}
+
+function exportProject() {
+  if (!currentPlan) renderCurrentPlan();
+  const meta = getJobMeta();
+  const project = {
+    app: 'bematrix-led-cable-planner',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    source: { width: currentPlan.width, height: currentPlan.height },
+    powerMode: currentPlan.powerMode,
+    nextAddedPanelId: currentPlan.nextAddedPanelId,
+    meta,
+    panels: [...currentPlan.panelMap.entries()].map(([positionKey, panel]) => {
+      const [col, row] = positionKey.split(':').map(Number);
+      return {
+        position: { col, row },
+        source: { col: panel.col, row: panel.row, addedLabel: panel.addedLabel ?? null },
+        data: { stringId: panel.dataStringId, order: panel.dataOrderInString },
+        power: { stringId: panel.powerStringId, order: panel.powerOrderInString },
+      };
+    }),
+  };
+  const jobSlug = safeFilename(meta.jobName || meta.clientName || 'led-wall');
+  downloadFile(`${jobSlug}-cable-plan.json`, `${JSON.stringify(project, null, 2)}\n`, 'application/json');
+}
+
+function requireInteger(value, label, minimum = 0) {
+  if (!Number.isInteger(value) || value < minimum) throw new Error(`${label} must be a whole number of at least ${minimum}.`);
+  return value;
+}
+
+function buildImportedStrings(panels, kind, limit) {
+  const groups = new Map();
+  panels.forEach((entry) => {
+    const assignment = entry[kind];
+    const stringId = requireInteger(assignment?.stringId, `${kind} string ID`, 1);
+    const order = requireInteger(assignment?.order, `${kind} string order`, 1);
+    if (!groups.has(stringId)) groups.set(stringId, []);
+    groups.get(stringId).push({ order, source: { ...entry.source } });
+  });
+  return [...groups.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([id, entries], index) => ({
+      id: index + 1,
+      kind,
+      limit,
+      panels: entries.sort((a, b) => a.order - b.order).map((entry) => entry.source),
+      color: palette[(kind === 'power' ? index + 4 : index) % palette.length],
+      ...(kind === 'data' ? { port: index + 1 } : { outlet: index + 1 }),
+    }));
+}
+
+function importProject(project) {
+  if (!project || project.app !== 'bematrix-led-cable-planner' || project.version !== 1) {
+    throw new Error('This is not a supported LED Cable Planner project file.');
+  }
+  const width = requireInteger(project.source?.width, 'Source width', 1);
+  const height = requireInteger(project.source?.height, 'Source height', 1);
+  if (!['standard', 'limited'].includes(project.powerMode)) throw new Error('The project has an invalid power mode.');
+  if (!Array.isArray(project.panels) || project.panels.length > 10000) throw new Error('The project panel list is invalid or too large.');
+
+  const plan = planLayout(width, height, project.powerMode);
+  const positionKeys = new Set();
+  const sourceKeys = new Set();
+  plan.panelMap = new Map();
+  project.panels.forEach((entry, index) => {
+    const col = requireInteger(entry.position?.col, `Panel ${index + 1} position column`);
+    const row = requireInteger(entry.position?.row, `Panel ${index + 1} position row`);
+    const sourceCol = requireInteger(entry.source?.col, `Panel ${index + 1} source column`);
+    const sourceRow = requireInteger(entry.source?.row, `Panel ${index + 1} source row`, -1);
+    const positionKey = `${col}:${row}`;
+    const sourceKey = `${sourceCol}:${sourceRow}`;
+    if (positionKeys.has(positionKey)) throw new Error(`More than one panel occupies position ${positionKey}.`);
+    if (sourceKeys.has(sourceKey)) throw new Error(`Panel source ${sourceKey} is duplicated.`);
+    positionKeys.add(positionKey);
+    sourceKeys.add(sourceKey);
+    plan.panelMap.set(positionKey, {
+      col: sourceCol,
+      row: sourceRow,
+      addedLabel: typeof entry.source.addedLabel === 'string' ? entry.source.addedLabel.slice(0, 80) : undefined,
+    });
+  });
+  plan.dataStrings = buildImportedStrings(project.panels, 'data', 12);
+  plan.powerStrings = buildImportedStrings(project.panels, 'power', project.powerMode === 'limited' ? 15 : 12);
+  plan.nextAddedPanelId = requireInteger(project.nextAddedPanelId ?? 1, 'Next added panel ID', 1);
+  plan.warnings = [];
+  refreshStringAssignments(plan);
+
+  const meta = project.meta && typeof project.meta === 'object' ? project.meta : {};
+  document.getElementById('width').value = width;
+  document.getElementById('height').value = height;
+  document.getElementById('power-mode').value = project.powerMode;
+  document.getElementById('job-name').value = typeof meta.jobName === 'string' ? meta.jobName : '';
+  document.getElementById('client-name').value = typeof meta.clientName === 'string' ? meta.clientName : '';
+  document.getElementById('install-date').value = typeof meta.installDate === 'string' ? meta.installDate : '';
+  document.getElementById('processor-type').value = ['MX20', 'MX30', 'MX40'].includes(meta.processorType) ? meta.processorType : '';
+  document.getElementById('ip-address').value = typeof meta.ipAddress === 'string' ? meta.ipAddress : '';
+  document.getElementById('job-notes').value = typeof meta.jobNotes === 'string' ? meta.jobNotes : '';
+  renderPlan(plan);
+}
+
+async function loadProjectFile(file) {
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) throw new Error('Project JSON files must be smaller than 5 MB.');
+  importProject(JSON.parse(await file.text()));
 }
 
 function downloadPixelMap() {
@@ -730,6 +949,38 @@ exportPdfBtn.addEventListener('click', () => {
 
 exportPixelMapBtn.addEventListener('click', () => {
   try { downloadPixelMap(); } catch (error) { renderWarnings([error.message]); }
+});
+
+exportProjectBtn.addEventListener('click', () => {
+  try { exportProject(); } catch (error) { renderWarnings([error.message]); }
+});
+
+importProjectBtn.addEventListener('click', () => importProjectFile.click());
+importProjectFile.addEventListener('change', async () => {
+  try {
+    await loadProjectFile(importProjectFile.files?.[0]);
+  } catch (error) {
+    renderWarnings([error instanceof SyntaxError ? 'The selected file is not valid JSON.' : error.message]);
+  } finally {
+    importProjectFile.value = '';
+  }
+});
+
+exportNprjBtn.addEventListener('click', () => {
+  setNprjStatus('Choose a known-good VMP .nprj template for this controller and firmware.');
+  nprjTemplateFile.click();
+});
+nprjTemplateFile.addEventListener('change', async () => {
+  exportNprjBtn.disabled = true;
+  setNprjStatus('Building VMP project…');
+  try {
+    await createNprj(nprjTemplateFile.files?.[0]);
+  } catch (error) {
+    setNprjStatus(error.message, true);
+  } finally {
+    exportNprjBtn.disabled = false;
+    nprjTemplateFile.value = '';
+  }
 });
 
 resetPanelLayoutBtn.addEventListener('click', () => {
