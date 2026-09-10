@@ -25,7 +25,6 @@ const exportProjectBtn = document.getElementById('export-project');
 const importProjectBtn = document.getElementById('import-project');
 const importProjectFile = document.getElementById('import-project-file');
 const exportNprjBtn = document.getElementById('export-nprj');
-const nprjTemplateFile = document.getElementById('nprj-template-file');
 const nprjStatusEl = document.getElementById('nprj-status');
 
 const palette = ['#2563eb','#7c3aed','#db2777','#ea580c','#0891b2','#16a34a','#b91c1c','#4f46e5','#0f766e','#a16207'];
@@ -376,6 +375,7 @@ function getProjectDevices(checkXml) {
   return [...documentXml.querySelectorAll('Device')].map((device) => ({
     element: device,
     ip: device.querySelector('DeviceIp')?.textContent?.trim() || '',
+    name: device.querySelector('DeviceName')?.textContent?.trim() || '',
     model: device.querySelector('DeviceTypeName')?.textContent?.trim() || 'Unknown controller',
     path: device.querySelector('DeviceDataFilePath')?.textContent?.trim() || '',
   }));
@@ -385,10 +385,11 @@ function findTemplateController(devices, requestedIp) {
   if (requestedIp) {
     const match = devices.find((device) => device.ip === requestedIp);
     if (match) return match;
+    const available = devices.map((device) => `${device.ip} (${device.model})`).join(', ');
+    throw new Error(`The controller IP does not match this template. Available controllers: ${available}.`);
   }
   if (devices.length === 1) return devices[0];
-  const available = devices.map((device) => `${device.ip} (${device.model})`).join(', ');
-  throw new Error(`Enter the controller IP from the template. Available controllers: ${available}.`);
+  return devices.find((device) => device.name.toLowerCase() === 'primary') || devices[0];
 }
 
 function updateScreenConfig(screenConfig, plan) {
@@ -432,13 +433,13 @@ function updateScreenConfig(screenConfig, plan) {
   return screenConfig;
 }
 
-async function createNprj(templateFile) {
+async function createNprj() {
   if (!window.JSZip) throw new Error('The ZIP library did not load. Check the internet connection and try again.');
-  if (!templateFile) return;
-  if (templateFile.size > 50 * 1024 * 1024) throw new Error('The VMP template must be smaller than 50 MB.');
   if (!currentPlan) renderCurrentPlan();
 
-  const outerZip = await JSZip.loadAsync(templateFile);
+  const templateResponse = await fetch('./mx40-vmp-template.nprj');
+  if (!templateResponse.ok) throw new Error('The MX40 VMP template could not be loaded.');
+  const outerZip = await JSZip.loadAsync(await templateResponse.arrayBuffer());
   const checkEntry = outerZip.file('check.xml');
   if (!checkEntry) throw new Error('This is not a VMP project: check.xml is missing.');
   const checkXml = await checkEntry.async('string');
@@ -966,20 +967,15 @@ importProjectFile.addEventListener('change', async () => {
   }
 });
 
-exportNprjBtn.addEventListener('click', () => {
-  setNprjStatus('Choose a known-good VMP .nprj template for this controller and firmware.');
-  nprjTemplateFile.click();
-});
-nprjTemplateFile.addEventListener('change', async () => {
+exportNprjBtn.addEventListener('click', async () => {
   exportNprjBtn.disabled = true;
   setNprjStatus('Building VMP project…');
   try {
-    await createNprj(nprjTemplateFile.files?.[0]);
+    await createNprj();
   } catch (error) {
     setNprjStatus(error.message, true);
   } finally {
     exportNprjBtn.disabled = false;
-    nprjTemplateFile.value = '';
   }
 });
 
