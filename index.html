@@ -105,7 +105,7 @@
       <section class="card board-card print-page">
         <div class="section-head">
           <h2>Graphic layout</h2>
-          <p>Drag panels onto occupied squares to swap them, or onto dashed empty squares to reshape the wall. Changes update every view and the pixel map immediately.</p>
+          <p>Click a panel to select it; Cmd-click (Mac) or Ctrl-click adds more. Drag a selection to move it, drop it on a data string to reassign it, or click an empty square to add a panel.</p>
         </div>
         <div class="view-toggle" id="view-toggle">
           <button type="button" class="toggle-btn active" data-view="combined">Combined</button>
@@ -116,7 +116,7 @@
         <div class="mapping-tools">
           <div id="new-panel-tool" class="mapping-tool new-panel-tool" draggable="true" tabindex="0">
             <strong>＋ New panel</strong>
-            <span>Drag into an empty square, or click here then click a square</span>
+            <span>Drag into an empty square, or simply click any empty square</span>
           </div>
           <div id="delete-panel-zone" class="mapping-tool delete-panel-zone">
             <strong>Delete panel</strong>
@@ -128,10 +128,10 @@
           <div class="panel-editor-controls" id="panel-editor-controls" hidden>
             <strong id="selected-panel-label">Selected panel</strong>
             <label>Data string <select id="selected-data-string"></select></label>
-            <label>Order <input id="selected-data-order" type="number" min="1" step="1" /></label>
-            <button id="move-panel-earlier" type="button" class="toggle-btn">← Earlier</button>
-            <button id="move-panel-later" type="button" class="toggle-btn">Later →</button>
-            <button id="remove-selected-panel" type="button" class="toggle-btn danger-btn">Remove</button>
+            <label class="single-selection-control">Order <input id="selected-data-order" type="number" min="1" step="1" /></label>
+            <button id="move-panel-earlier" type="button" class="toggle-btn single-selection-control">← Earlier</button>
+            <button id="move-panel-later" type="button" class="toggle-btn single-selection-control">Later →</button>
+            <button id="remove-selected-panel" type="button" class="toggle-btn danger-btn">Remove selected</button>
           </div>
           <div class="board-zoom" aria-label="Panel view zoom controls">
             <button id="undo-panel-edit" type="button" class="toggle-btn" disabled>Undo</button>

@@ -39,6 +39,7 @@ let activeView = 'combined';
 let activeDragPayload = null;
 let placingNewPanel = false;
 let selectedPositionKey = null;
+let selectedPositionKeys = new Set();
 let boardZoom = 1;
 const panelEditHistory = [];
 
@@ -64,7 +65,8 @@ function restorePlan(snapshot) {
   currentPlan.powerStrings = snapshot.powerStrings;
   currentPlan.nextAddedPanelId = snapshot.nextAddedPanelId;
   refreshStringAssignments(currentPlan);
-  if (selectedPositionKey && !currentPlan.panelMap.has(selectedPositionKey)) selectedPositionKey = null;
+  selectedPositionKeys = new Set([...selectedPositionKeys].filter((key) => currentPlan.panelMap.has(key)));
+  selectedPositionKey = selectedPositionKeys.has(selectedPositionKey) ? selectedPositionKey : [...selectedPositionKeys][0] || null;
   renderMappedPlan();
 }
 
@@ -779,11 +781,10 @@ function createBoardView(plan, view) {
       tile.style.gridRow = `${row + 1}`;
       if (!panel) {
         tile.className = `panel empty-panel${col >= plan.layoutWidth || row >= plan.layoutHeight ? ' expansion-slot' : ''}`;
-        tile.innerHTML = '<span>Drop panel here</span>';
-        tile.title = 'Drop a panel here to expand or reshape the layout';
+        tile.innerHTML = '<span>Click or drop to add panel</span>';
+        tile.title = 'Click to add a panel, or drop selected panels here to move them';
         addPanelDropHandlers(tile);
         tile.addEventListener('click', () => {
-          if (!placingNewPanel) return;
           addPanelAt(tile.dataset.positionKey);
           placingNewPanel = false;
           newPanelTool.classList.remove('placing');
@@ -793,7 +794,7 @@ function createBoardView(plan, view) {
       }
       const bg = view === 'power' ? plan.powerStrings[panel.powerStringId - 1]?.color : plan.dataStrings[panel.dataStringId - 1]?.color;
       tile.className = `panel${panel.isDataStart ? ' start-panel' : ''}${panel.isDataEnd ? ' end-panel' : ''}${panel.isPowerStart ? ' power-start-panel' : ''}`;
-      if (tile.dataset.positionKey === selectedPositionKey) tile.classList.add('selected-panel');
+      if (selectedPositionKeys.has(tile.dataset.positionKey)) tile.classList.add('selected-panel');
       if (view === 'power') tile.classList.add('power-mode-panel');
       tile.style.background = bg ?? '#334155';
       tile.dataset.key = `${panel.col}:${panel.row}`;
@@ -804,8 +805,15 @@ function createBoardView(plan, view) {
         event.stopPropagation();
         deletePanelAt(tile.dataset.positionKey);
       });
-      tile.addEventListener('click', () => {
-        selectedPositionKey = tile.dataset.positionKey;
+      tile.addEventListener('click', (event) => {
+        const key = tile.dataset.positionKey;
+        if (event.metaKey || event.ctrlKey) {
+          if (selectedPositionKeys.has(key)) selectedPositionKeys.delete(key);
+          else selectedPositionKeys.add(key);
+        } else {
+          selectedPositionKeys = new Set([key]);
+        }
+        selectedPositionKey = selectedPositionKeys.has(key) ? key : [...selectedPositionKeys][0] || null;
         renderBoardViews(currentPlan);
         renderPanelEditor();
       });
@@ -854,6 +862,10 @@ function movePanel(sourceKey, targetKey) {
     if (!currentPlan.panelMap.has(targetKey)) addPanelAt(targetKey);
     return;
   }
+  if (selectedPositionKeys.size > 1 && selectedPositionKeys.has(sourceKey)) {
+    movePanelGroup(sourceKey, targetKey);
+    return;
+  }
   const sourcePanel = currentPlan.panelMap.get(sourceKey);
   const targetPanel = currentPlan.panelMap.get(targetKey);
   if (!sourcePanel) return;
@@ -861,8 +873,35 @@ function movePanel(sourceKey, targetKey) {
   currentPlan.panelMap.delete(sourceKey);
   if (targetPanel) currentPlan.panelMap.set(sourceKey, targetPanel);
   currentPlan.panelMap.set(targetKey, sourcePanel);
-  if (selectedPositionKey === sourceKey) selectedPositionKey = targetKey;
-  else if (selectedPositionKey === targetKey) selectedPositionKey = sourceKey;
+  selectedPositionKey = targetKey;
+  selectedPositionKeys = new Set([selectedPositionKey]);
+  updateLayoutMetrics(currentPlan);
+  renderMappedPlan();
+}
+
+function movePanelGroup(anchorKey, targetKey) {
+  const [anchorCol, anchorRow] = anchorKey.split(':').map(Number);
+  const [targetCol, targetRow] = targetKey.split(':').map(Number);
+  const deltaCol = targetCol - anchorCol;
+  const deltaRow = targetRow - anchorRow;
+  const moves = [...selectedPositionKeys].map((sourceKey) => {
+    const [col, row] = sourceKey.split(':').map(Number);
+    return { sourceKey, targetKey: `${col + deltaCol}:${row + deltaRow}`, panel: currentPlan.panelMap.get(sourceKey) };
+  });
+  if (moves.some((move) => !move.panel || move.targetKey.split(':').map(Number).some((value) => value < 0))) {
+    renderWarnings(['The selected group cannot be moved outside the layout.']);
+    return;
+  }
+  const selected = new Set(selectedPositionKeys);
+  if (moves.some((move) => currentPlan.panelMap.has(move.targetKey) && !selected.has(move.targetKey))) {
+    renderWarnings(['The selected group cannot overlap panels outside the selection. Drop it onto an empty area.']);
+    return;
+  }
+  pushPanelUndo();
+  moves.forEach((move) => currentPlan.panelMap.delete(move.sourceKey));
+  moves.forEach((move) => currentPlan.panelMap.set(move.targetKey, move.panel));
+  selectedPositionKeys = new Set(moves.map((move) => move.targetKey));
+  selectedPositionKey = `${targetCol}:${targetRow}`;
   updateLayoutMetrics(currentPlan);
   renderMappedPlan();
 }
@@ -893,6 +932,8 @@ function addPanelAt(targetKey) {
     dataNext: null, powerNext: null,
   };
   currentPlan.panelMap.set(targetKey, panel);
+  selectedPositionKeys = new Set([targetKey]);
+  selectedPositionKey = targetKey;
   appendPanelToString(currentPlan.dataStrings, sourcePanel, 'data', 12);
   appendPanelToString(currentPlan.powerStrings, sourcePanel, 'power', currentPlan.powerMode === 'limited' ? 15 : 12);
   refreshStringAssignments(currentPlan);
@@ -908,6 +949,21 @@ function deletePanelAt(positionKey) {
   currentPlan.powerStrings.forEach((string) => { string.panels = string.panels.filter((source) => !sameSourcePanel(source, panel)); });
   refreshStringAssignments(currentPlan);
   if (selectedPositionKey === positionKey) selectedPositionKey = null;
+  selectedPositionKeys.delete(positionKey);
+  renderMappedPlan();
+}
+
+function deleteSelectedPanels() {
+  const keys = [...selectedPositionKeys].filter((key) => currentPlan.panelMap.has(key));
+  if (!keys.length) return;
+  pushPanelUndo();
+  const panels = keys.map((key) => currentPlan.panelMap.get(key));
+  keys.forEach((key) => currentPlan.panelMap.delete(key));
+  currentPlan.dataStrings.forEach((string) => { string.panels = string.panels.filter((source) => !panels.some((panel) => sameSourcePanel(source, panel))); });
+  currentPlan.powerStrings.forEach((string) => { string.panels = string.panels.filter((source) => !panels.some((panel) => sameSourcePanel(source, panel))); });
+  selectedPositionKeys.clear();
+  selectedPositionKey = null;
+  refreshStringAssignments(currentPlan);
   renderMappedPlan();
 }
 
@@ -948,15 +1004,45 @@ function movePanelToDataString(positionKey, targetStringId, requestedOrder) {
   renderMappedPlan();
 }
 
+function moveSelectedPanelsToDataString(targetStringId) {
+  const selectedPanels = [...selectedPositionKeys].map((key) => currentPlan.panelMap.get(key)).filter(Boolean);
+  if (selectedPanels.length < 2) {
+    if (selectedPositionKey) movePanelToDataString(selectedPositionKey, targetStringId);
+    return;
+  }
+  let targetString = currentPlan.dataStrings.find((string) => string.id === targetStringId);
+  if (!targetString) {
+    targetString = { id: currentPlan.dataStrings.length + 1, port: currentPlan.dataStrings.length + 1, kind: 'data', limit: 12, panels: [], color: palette[currentPlan.dataStrings.length % palette.length] };
+    currentPlan.dataStrings.push(targetString);
+  }
+  const selectedSources = currentPlan.dataStrings.flatMap((string) => string.panels).filter((source) => selectedPanels.some((panel) => sameSourcePanel(source, panel)));
+  const alreadyOnTarget = targetString.panels.filter((source) => selectedPanels.some((panel) => sameSourcePanel(source, panel))).length;
+  if (targetString.panels.length - alreadyOnTarget + selectedSources.length > targetString.limit) {
+    renderWarnings([`Data String ${targetString.id} cannot hold all ${selectedSources.length} selected panels (${targetString.limit} maximum).`]);
+    return;
+  }
+  pushPanelUndo();
+  currentPlan.dataStrings.forEach((string) => {
+    string.panels = string.panels.filter((source) => !selectedPanels.some((panel) => sameSourcePanel(source, panel)));
+  });
+  targetString.panels.push(...selectedSources);
+  refreshStringAssignments(currentPlan);
+  renderMappedPlan();
+}
+
 function renderPanelEditor() {
   const panel = getSelectedPanel();
-  panelEditorEmpty.hidden = Boolean(panel);
-  panelEditorControls.hidden = !panel;
+  const selectionCount = selectedPositionKeys.size;
+  panelEditorEmpty.hidden = selectionCount > 0;
+  panelEditorControls.hidden = selectionCount === 0;
+  panelEditorControls.classList.toggle('multi-select', selectionCount > 1);
   if (!panel) return;
   const position = selectedPositionKey.split(':').map(Number);
-  selectedPanelLabel.textContent = `Selected C${position[0] + 1}/R${currentPlan.layoutHeight - position[1]}`;
+  selectedPanelLabel.textContent = selectionCount > 1 ? `${selectionCount} panels selected` : `Selected C${position[0] + 1}/R${currentPlan.layoutHeight - position[1]}`;
   selectedDataString.innerHTML = currentPlan.dataStrings.map((string) => `<option value="${string.id}">String ${string.id} (${string.panels.length}/${string.limit})</option>`).join('') + `<option value="new">＋ New string</option>`;
-  selectedDataString.value = String(panel.dataStringId);
+  const selectedStringIds = new Set([...selectedPositionKeys].map((key) => currentPlan.panelMap.get(key)?.dataStringId));
+  selectedDataString.value = selectedStringIds.size === 1 ? String(panel.dataStringId) : '';
+  if (selectedStringIds.size > 1) selectedDataString.insertAdjacentHTML('afterbegin', '<option value="" selected>Multiple strings</option>');
   selectedDataOrder.max = String(currentPlan.dataStrings.find((string) => string.id === panel.dataStringId)?.panels.length || 1);
   selectedDataOrder.value = String(panel.dataOrderInString || 1);
 }
@@ -1081,7 +1167,10 @@ function renderStrings(plan) {
           event.preventDefault();
           card.classList.remove('string-drop-target');
           const positionKey = event.dataTransfer.getData('text/plain') || activeDragPayload;
-          if (positionKey && positionKey !== 'NEW_PANEL') movePanelToDataString(positionKey, string.id, string.panels.length + 1);
+          if (positionKey && positionKey !== 'NEW_PANEL') {
+            if (selectedPositionKeys.size > 1 && selectedPositionKeys.has(positionKey)) moveSelectedPanelsToDataString(string.id);
+            else movePanelToDataString(positionKey, string.id, string.panels.length + 1);
+          }
         });
       }
       section.appendChild(card);
@@ -1148,6 +1237,7 @@ function syncActiveView() {
 function renderPlan(plan) {
   currentPlan = plan;
   selectedPositionKey = null;
+  selectedPositionKeys = new Set();
   panelEditHistory.length = 0;
   undoPanelEditBtn.disabled = true;
   applyPrintSizing(plan);
@@ -1183,8 +1273,10 @@ viewToggleEl.addEventListener('click', (event) => {
 
 selectedDataString.addEventListener('change', () => {
   if (!selectedPositionKey) return;
+  if (!selectedDataString.value) return;
   const targetId = selectedDataString.value === 'new' ? currentPlan.dataStrings.length + 1 : Number(selectedDataString.value);
-  movePanelToDataString(selectedPositionKey, targetId);
+  if (selectedPositionKeys.size > 1) moveSelectedPanelsToDataString(targetId);
+  else movePanelToDataString(selectedPositionKey, targetId);
 });
 
 selectedDataOrder.addEventListener('change', () => {
@@ -1201,7 +1293,7 @@ document.getElementById('move-panel-later').addEventListener('click', () => {
   if (panel) movePanelToDataString(selectedPositionKey, panel.dataStringId, panel.dataOrderInString + 1);
 });
 document.getElementById('remove-selected-panel').addEventListener('click', () => {
-  if (selectedPositionKey) deletePanelAt(selectedPositionKey);
+  deleteSelectedPanels();
 });
 undoPanelEditBtn.addEventListener('click', () => {
   const snapshot = panelEditHistory.pop();
@@ -1277,7 +1369,10 @@ deletePanelZone.addEventListener('drop', (event) => {
   event.preventDefault();
   deletePanelZone.classList.remove('drop-target');
   const positionKey = event.dataTransfer.getData('text/plain') || activeDragPayload;
-  if (positionKey && positionKey !== 'NEW_PANEL') deletePanelAt(positionKey);
+  if (positionKey && positionKey !== 'NEW_PANEL') {
+    if (selectedPositionKeys.size > 1 && selectedPositionKeys.has(positionKey)) deleteSelectedPanels();
+    else deletePanelAt(positionKey);
+  }
 });
 
 window.addEventListener('resize', () => { if (currentPlan) renderBoardViews(currentPlan); });
