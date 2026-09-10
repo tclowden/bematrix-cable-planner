@@ -416,7 +416,7 @@ function updateProjectXml(checkXml, controller, processorIp, archivePath, projec
   return new XMLSerializer().serializeToString(documentXml);
 }
 
-function updateScreenConfig(screenConfig, plan) {
+function updateScreenConfig(screenConfig, plan, cabinetIds) {
   const canvases = screenConfig.screens?.flatMap((screen) => screen.canvases || []) || [];
   if (!canvases.length) throw new Error('The selected controller template has no screen canvas.');
   const cabinetPool = canvases.flatMap((canvas) => canvas.cabinets || []);
@@ -441,6 +441,7 @@ function updateScreenConfig(screenConfig, plan) {
     const [col, row] = position;
     return {
       ...cabinetPool[index],
+      cabinetID: `__NOVA_CABINET_ID_${cabinetIds[index]}__`,
       connectID: assignment.connectID,
       outputID: assignment.outputID,
       pageID: 0,
@@ -472,6 +473,10 @@ function updateScreenConfig(screenConfig, plan) {
     internalCanvas.isCustomSize = true;
   }
   return screenConfig;
+}
+
+function serializeNovaConfig(config) {
+  return `${JSON.stringify(config, null, 4).replace(/"__NOVA_CABINET_ID_(\d+)__"/g, '$1')}\n`;
 }
 
 function setInternalOutputSource(outputConfig) {
@@ -506,8 +511,13 @@ async function createNprj() {
   const configPath = 'controller3.1/usrconfig/screenConfig.json';
   const configEntry = controllerZip.file(configPath);
   if (!configEntry) throw new Error(`The ${controller.model} template does not contain ${configPath}.`);
-  const screenConfig = JSON.parse(await configEntry.async('string'));
-  controllerZip.file(configPath, `${JSON.stringify(updateScreenConfig(screenConfig, currentPlan), null, 4)}\n`);
+  const rawScreenConfig = await configEntry.async('string');
+  const cabinetIds = [...rawScreenConfig.matchAll(/"cabinetID"\s*:\s*(\d+)/g)].map((match) => match[1]);
+  if (cabinetIds.length < currentPlan.totalPanels) {
+    throw new Error(`The template contains only ${cabinetIds.length} exact cabinet IDs for ${currentPlan.totalPanels} panels.`);
+  }
+  const screenConfig = JSON.parse(rawScreenConfig);
+  controllerZip.file(configPath, serializeNovaConfig(updateScreenConfig(screenConfig, currentPlan, cabinetIds)));
 
   const meta = getJobMeta();
   const projectName = meta.jobName || meta.clientName || 'LED Wall';
